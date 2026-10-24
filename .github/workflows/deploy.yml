@@ -20,7 +20,7 @@ jobs:
     environment: production # Environnement protégé GitHub Actions
 
     env:
-      AWS_REGION: eu-west-3
+      AWS_REGION: eu-north-1
 
     steps:
       - name: Checkout du code

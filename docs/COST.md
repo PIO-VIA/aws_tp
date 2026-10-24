@@ -1,7 +1,7 @@
 # Modèle Économique et Estimation des Coûts AWS (COST.md)
 
 Projet : **Éditeur de documents collaboratif avec téléchargement versionné**  
-Région principale : `eu-west-3` (Paris)  
+Région principale : `eu-north-1` (Paris)  
 Budget mensuel alloué : **10,00 USD** (surveillé par AWS Budgets à 50 %, 80 % et 100 %)
 
 ---
@@ -18,7 +18,7 @@ L'architecture a été conçue pour minimiser les coûts d'infrastructure en exp
 
 ---
 
-## 2. Grille Tarifaire par Service (eu-west-3)
+## 2. Grille Tarifaire par Service (eu-north-1)
 
 | Service | Unité de facturation | Tarif unitaire indicatif | Franchise gratuite (Free Tier) |
 | :--- | :--- | :--- | :--- |

@@ -81,8 +81,7 @@ export async function handleDownloadRequest(
 
   if (existingRes.Item) {
     metric("DownloadRequests", 1, { state: "idempotent" });
-    const res = existingRes.Item as ReservationRecord;
-    return await mapReservationToResponse(res, linkId);
+    return mapReservationToResponse(existingRes.Item as ReservationRecord);
   }
 
   // c. Chemin rapide "épuisé" (sans écriture dans DynamoDB)
@@ -172,7 +171,7 @@ export async function handleDownloadRequest(
             }),
           );
           if (doubleRes.Item) {
-            return await mapReservationToResponse(doubleRes.Item as ReservationRecord, linkId);
+            return mapReservationToResponse(doubleRes.Item as ReservationRecord);
           }
         }
         log.warn("reservation.tx_canceled", { linkId, requestId, reasons });
@@ -291,7 +290,7 @@ export async function handleDownloadRequest(
         }),
       );
       if (reRead.Item) {
-        return await mapReservationToResponse(reRead.Item as ReservationRecord, linkId);
+        return mapReservationToResponse(reRead.Item as ReservationRecord);
       }
     }
   }
@@ -357,64 +356,9 @@ export async function handleGetReservation(
 
   const res = resItem.Item as ReservationRecord;
 
-  // status "url_issued"
-  if (res.status === "url_issued") {
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (res.url && res.urlExpiresAt && nowSec < res.urlExpiresAt) {
-      return {
-        status: 200,
-        body: {
-          state: "granted",
-          url: res.url,
-          expiresAt: res.urlExpiresAt,
-          reservationId: res.reservationId,
-          filename: res.filename ?? "document.pdf",
-        },
-      };
-    }
-
-    // Si l'URL pré-signée a expiré, régénérer une URL valide pour cette réservation
-    if (res.versionId) {
-      const pdfKey = `pdfs/${res.docId}/${res.versionId}.pdf`;
-      const pdfExists = await headObject(pdfKey);
-      if (pdfExists) {
-        const docSlug = slugify(res.docId);
-        const filename = res.filename ?? `${docSlug}-${res.versionId.substring(0, 8)}.pdf`;
-        const { url: newUrl, expiresAtEpochSec } = await getPresignedDownloadUrl(
-          pdfKey,
-          filename,
-          config.PRESIGN_TTL_SEC,
-        );
-
-        await docClient.send(
-          new UpdateCommand({
-            TableName: resTable,
-            Key: { linkId, reservationId },
-            UpdateExpression: "SET #url = :u, urlExpiresAt = :exp",
-            ExpressionAttributeNames: { "#url": "url" },
-            ExpressionAttributeValues: { ":u": newUrl, ":exp": expiresAtEpochSec },
-          }),
-        );
-
-        return {
-          status: 200,
-          body: {
-            state: "granted",
-            url: newUrl,
-            expiresAt: expiresAtEpochSec,
-            reservationId: res.reservationId,
-            filename,
-          },
-        };
-      }
-    }
-
-    return { status: 200, body: { state: "expired" } };
-  }
-
-  // status "cancelled"
-  if (res.status === "cancelled") {
-    return { status: 200, body: { state: "failed" } };
+  // status "url_issued" ou "cancelled" : traité par mapReservationToResponse (aucune réémission)
+  if (res.status === "url_issued" || res.status === "cancelled") {
+    return mapReservationToResponse(res);
   }
 
   // status "reserved"
@@ -492,7 +436,7 @@ export async function handleGetReservation(
           }),
         );
         if (reRead.Item) {
-          return await mapReservationToResponse(reRead.Item as ReservationRecord, linkId);
+          return mapReservationToResponse(reRead.Item as ReservationRecord);
         }
       }
     }
@@ -516,16 +460,14 @@ export async function handleGetReservation(
   return { status: 500, body: { state: "failed" } };
 }
 
-async function mapReservationToResponse(
+export function mapReservationToResponse(
   res: ReservationRecord,
-  linkId?: string,
-): Promise<{
+): {
   status: number;
   body: DlResponseState;
   retryAfterSec?: number;
-}> {
+} {
   const nowSec = Math.floor(Date.now() / 1000);
-  const config = getConfig();
 
   if (res.status === "url_issued") {
     if (res.url && res.urlExpiresAt && nowSec < res.urlExpiresAt) {
@@ -541,43 +483,8 @@ async function mapReservationToResponse(
       };
     }
 
-    // Régénération d'une URL pré-signée si expirée
-    if (res.versionId && linkId) {
-      const pdfKey = `pdfs/${res.docId}/${res.versionId}.pdf`;
-      const pdfExists = await headObject(pdfKey);
-      if (pdfExists) {
-        const docSlug = slugify(res.docId);
-        const filename = res.filename ?? `${docSlug}-${res.versionId.substring(0, 8)}.pdf`;
-        const { url: newUrl, expiresAtEpochSec } = await getPresignedDownloadUrl(
-          pdfKey,
-          filename,
-          config.PRESIGN_TTL_SEC,
-        );
-
-        const docClient = getDocClient();
-        await docClient.send(
-          new UpdateCommand({
-            TableName: tableName("reservations"),
-            Key: { linkId, reservationId: res.reservationId },
-            UpdateExpression: "SET #url = :u, urlExpiresAt = :exp",
-            ExpressionAttributeNames: { "#url": "url" },
-            ExpressionAttributeValues: { ":u": newUrl, ":exp": expiresAtEpochSec },
-          }),
-        );
-
-        return {
-          status: 200,
-          body: {
-            state: "granted",
-            url: newUrl,
-            expiresAt: expiresAtEpochSec,
-            reservationId: res.reservationId,
-            filename,
-          },
-        };
-      }
-    }
-
+    // Invariant C-02 / C1 : au plus UNE URL pré-signée par réservation.
+    // Une fois expirée, renvoyer 200 { state: "expired" }. Aucune régénération, aucune écriture.
     return { status: 200, body: { state: "expired" } };
   }
 

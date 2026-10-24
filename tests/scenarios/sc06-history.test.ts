@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "crypto";
 import http from "http";
 import * as Y from "yjs";
@@ -113,7 +113,9 @@ describe("SC06 — Historique des versions, restauration et limite de fréquence
     // Version 1
     const textV1 = "Version 1 : Le texte initial.";
     ydoc.getText("content").insert(0, textV1);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await vi.waitFor(() => {
+      expect(collabServer.hocuspocus.documents.get(docId)?.getText("content").toString()).toBe(textV1);
+    }, { timeout: 10000 });
     const snap1 = await requestSnapshot(docId, "manual", writerAlice.writerId);
     snapV1Id = snap1.snapshotId;
 
@@ -121,7 +123,9 @@ describe("SC06 — Historique des versions, restauration et limite de fréquence
     const textV2 = "Version 2 : Ajout d'articles importants.";
     ydoc.getText("content").delete(0, ydoc.getText("content").length);
     ydoc.getText("content").insert(0, textV2);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await vi.waitFor(() => {
+      expect(collabServer.hocuspocus.documents.get(docId)?.getText("content").toString()).toBe(textV2);
+    }, { timeout: 10000 });
     const snap2 = await requestSnapshot(docId, "manual", writerAlice.writerId);
     snapV2Id = snap2.snapshotId;
 
@@ -129,7 +133,9 @@ describe("SC06 — Historique des versions, restauration et limite de fréquence
     const textV3 = "Version 3 : Version finale en discussion.";
     ydoc.getText("content").delete(0, ydoc.getText("content").length);
     ydoc.getText("content").insert(0, textV3);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await vi.waitFor(() => {
+      expect(collabServer.hocuspocus.documents.get(docId)?.getText("content").toString()).toBe(textV3);
+    }, { timeout: 10000 });
     const snap3 = await requestSnapshot(docId, "manual", writerAlice.writerId);
     snapV3Id = snap3.snapshotId;
 

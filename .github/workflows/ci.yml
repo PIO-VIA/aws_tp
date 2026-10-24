@@ -38,7 +38,7 @@ jobs:
       SMTP_HOST: 127.0.0.1
       SMTP_PORT: 1025
       MAIL_FROM: journal@asso.fr
-      AWS_REGION: eu-west-3
+      AWS_REGION: eu-north-1
       AWS_ACCESS_KEY_ID: mock-key
       AWS_SECRET_ACCESS_KEY: mock-secret
 

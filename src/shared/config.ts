@@ -22,7 +22,7 @@ const optionalUrl = z
 export const configSchema = z
   .object({
     APP_ENV: z.enum(["local", "aws"]).default("local"),
-    AWS_REGION: z.string().min(1).default("eu-west-3"),
+    AWS_REGION: z.string().min(1).default("eu-north-1"),
     TABLE_PREFIX: z.string().min(1).default("editeur-local-"),
 
     DDB_ENDPOINT: optionalUrl,
@@ -59,7 +59,7 @@ export const configSchema = z
 
     DAILY_CREDIT: intFrom(10000, 1),
     MAX_DOWNLOADS_CAP: intFrom(1000, 1),
-    PRESIGN_TTL_SEC: intFrom(60, 5),
+    PRESIGN_TTL_SEC: intFrom(60, 1),
     HEAD_COALESCE_MS: intFrom(1000, 0),
     MAX_UPDATE_BYTES: intFrom(65536, 1024),
     MAX_AWARENESS_BYTES: intFrom(2048, 256),
@@ -74,6 +74,7 @@ export const configSchema = z
     SNAPSHOT_EVERY_UPDATES: intFrom(100, 1),
     SNAPSHOT_EVERY_SEC: intFrom(300, 1),
     JOURNAL_TTL_DAYS: intFrom(30, 1),
+    REPLAY_MARGIN: intFrom(200, 0),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .transform((c) => ({

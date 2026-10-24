@@ -24,12 +24,13 @@ import { parseAndValidateUpdate } from "../src/shared/yjs/message-parser";
 import { consumeQuota, recordAbuseEvent } from "../src/shared/quota/quota";
 import { log } from "../src/shared/log";
 
-interface DocState {
+export interface DocState {
   nextSeq: number;
   intervalSet: IntervalSet;
   updatesSinceSnapshot: number;
   lastSnapshotAt: number;
   latestSeq: number;
+  inFlight: Set<number>;
 }
 
 interface CollabContext {
@@ -41,6 +42,21 @@ interface CollabContext {
 
 const docStates = new Map<string, DocState>();
 
+export function safeUpToSeq(state: { latestSeq: number; inFlight: Set<number> }): number {
+  if (!state.inFlight || state.inFlight.size === 0) {
+    return state.latestSeq;
+  }
+  let min = Infinity;
+  for (const s of state.inFlight) {
+    if (s < min) min = s;
+  }
+  return min - 1;
+}
+
+export function resetDocStates(): void {
+  docStates.clear();
+}
+
 export function getOrCreateDocState(docId: string): DocState {
   let state = docStates.get(docId);
   if (!state) {
@@ -50,6 +66,7 @@ export function getOrCreateDocState(docId: string): DocState {
       updatesSinceSnapshot: 0,
       lastSnapshotAt: Date.now(),
       latestSeq: 0,
+      inFlight: new Set<number>(),
     };
     docStates.set(docId, state);
   }
@@ -66,11 +83,16 @@ export async function persistDocumentSnapshot(
   byWriterId?: string,
 ): Promise<{ snapshotId: string; versionId: string }> {
   const docClient = getDocClient();
+  const config = getConfig();
   const state = getOrCreateDocState(docId);
   const now = Math.floor(Date.now() / 1000);
 
-  // 1. Snapshot complet de l'état Yjs
+  // Synchronously capture upToSeq and snapshotBytes in the same tick before ANY await
+  const upToSeq = safeUpToSeq(state);
   const snapshotBytes = Y.encodeStateAsUpdate(ydoc);
+  const text = ydoc.getText("content").toString();
+  const versionId = computeVersionId(text);
+
   const datePrefix = new Date().toISOString().replace(/[-:T.Z]/g, "").substring(0, 17);
   const rand = randomBytes(4).toString("hex");
   const snapshotId = `${datePrefix}-${rand}`;
@@ -78,9 +100,6 @@ export async function persistDocumentSnapshot(
 
   await putObject(s3Key, Buffer.from(snapshotBytes), "application/octet-stream");
 
-  // 2. Extraction du texte brut et calcul du hash immuable
-  const text = ydoc.getText("content").toString();
-  const versionId = computeVersionId(text);
   const textKey = `texts/${docId}/${versionId}.txt`;
   await putObjectIfNotExist(textKey, text, "text/plain; charset=utf-8");
 
@@ -102,7 +121,6 @@ export async function persistDocumentSnapshot(
   }
 
   // 3. Enregistrement dans doc_snapshots
-  const upToSeq = state.latestSeq;
   await docClient.send(
     new PutCommand({
       TableName: tableName("doc_snapshots"),
@@ -147,8 +165,8 @@ export async function persistDocumentSnapshot(
     reason,
   });
 
-  // 5. Best-effort : suppression des updates journalisés <= upToSeq
-  pruneJournalBestEffort(docId, upToSeq).catch((err) => {
+  // 5. Best-effort : suppression des updates journalisés <= upToSeq - config.REPLAY_MARGIN
+  pruneJournalBestEffort(docId, upToSeq - config.REPLAY_MARGIN).catch((err) => {
     log.debug("collab.journal.prune_error", { docId, error: err });
   });
 
@@ -199,6 +217,7 @@ export async function loadDocumentState(
   ydoc: Y.Doc,
 ): Promise<{ baseSeq: number; maxSeq: number }> {
   const docClient = getDocClient();
+  const config = getConfig();
   let baseSeq = 0;
 
   // 1. Dernier snapshot depuis doc_snapshots / S3
@@ -221,7 +240,8 @@ export async function loadDocumentState(
     }
   }
 
-  // 2. Rejeu des updates depuis doc_updates avec seq > upToSeq
+  // 2. Rejeu des updates depuis doc_updates avec seq > max(0, baseSeq - REPLAY_MARGIN)
+  const replayStartSeq = Math.max(0, baseSeq - config.REPLAY_MARGIN);
   let lastEvaluatedKey: Record<string, unknown> | undefined;
   let maxSeq = baseSeq;
 
@@ -229,10 +249,10 @@ export async function loadDocumentState(
     const updatesRes = await docClient.send(
       new QueryCommand({
         TableName: tableName("doc_updates"),
-        KeyConditionExpression: "docId = :docId AND seq > :baseSeq",
+        KeyConditionExpression: "docId = :docId AND seq > :startSeq",
         ExpressionAttributeValues: {
           ":docId": docId,
-          ":baseSeq": baseSeq,
+          ":startSeq": replayStartSeq,
         },
         ScanIndexForward: true,
         ExclusiveStartKey: lastEvaluatedKey,
@@ -259,7 +279,11 @@ export async function loadDocumentState(
   return { baseSeq, maxSeq };
 }
 
-export function createCollabServer(): { server: Server; internalHttp: http.Server } {
+export interface CollabServerOptions {
+  snapshotOnUnload?: boolean;
+}
+
+export function createCollabServer(options?: CollabServerOptions): { server: Server; internalHttp: http.Server } {
   const config = getConfig();
 
   const server = new Server({
@@ -422,7 +446,7 @@ export function createCollabServer(): { server: Server; internalHttp: http.Serve
 
       // 5. Journal Write-Ahead : PutItem doc_updates (seq = nextSeq++)
       const seq = state.nextSeq++;
-      state.latestSeq = seq;
+      state.inFlight.add(seq);
       const docClient = getDocClient();
       const now = Math.floor(Date.now() / 1000);
 
@@ -442,7 +466,24 @@ export function createCollabServer(): { server: Server; internalHttp: http.Serve
             ConditionExpression: "attribute_not_exists(seq)",
           }),
         );
+
+        // 6. Marquer les intervalles comme facturés
+        parseAndValidateUpdate(rawUpdate, state.intervalSet, true);
+
+        // 7. Compteur pour snapshot automatique
+        state.updatesSinceSnapshot++;
+        if (state.updatesSinceSnapshot >= config.SNAPSHOT_EVERY_UPDATES) {
+          persistDocumentSnapshot(docId, data.document, "auto", context?.writerId).catch((err) => {
+            log.warn("collab.auto_snapshot_failed", { docId, error: err });
+          });
+        }
+
+        setImmediate(() => {
+          state.inFlight.delete(seq);
+          state.latestSeq = Math.max(state.latestSeq, seq);
+        });
       } catch (err: unknown) {
+        state.inFlight.delete(seq);
         log.error("collab.persist.failed", { docId, seq, error: err });
         connection?.sendStateless(
           JSON.stringify({
@@ -452,17 +493,6 @@ export function createCollabServer(): { server: Server; internalHttp: http.Serve
         );
         throw new Error("persist_failed");
       }
-
-      // 6. Marquer les intervalles comme facturés
-      parseAndValidateUpdate(rawUpdate, state.intervalSet, true);
-
-      // 7. Compteur pour snapshot automatique
-      state.updatesSinceSnapshot++;
-      if (state.updatesSinceSnapshot >= config.SNAPSHOT_EVERY_UPDATES) {
-        persistDocumentSnapshot(docId, data.document, "auto", context?.writerId).catch((err) => {
-          log.warn("collab.auto_snapshot_failed", { docId, error: err });
-        });
-      }
     },
 
     async onStoreDocument(data) {
@@ -471,7 +501,9 @@ export function createCollabServer(): { server: Server; internalHttp: http.Serve
     },
 
     async beforeUnloadDocument(data) {
-      await persistDocumentSnapshot(data.documentName, data.document, "unload");
+      if (options?.snapshotOnUnload !== false) {
+        await persistDocumentSnapshot(data.documentName, data.document, "unload");
+      }
     },
   });
 
@@ -591,24 +623,29 @@ export function createCollabServer(): { server: Server; internalHttp: http.Serve
         // Journalisation de la mise à jour sans facturation de crédit (billedChars = 0, I08)
         if (deltaUpdate) {
           const seq = state.nextSeq++;
-          state.latestSeq = seq;
+          state.inFlight.add(seq);
           const now = Math.floor(Date.now() / 1000);
           const docClient = getDocClient();
-          await docClient.send(
-            new PutCommand({
-              TableName: tableName("doc_updates"),
-              Item: {
-                docId,
-                seq,
-                update: Buffer.from(deltaUpdate),
-                writerId: body.byWriterId || "system",
-                billedChars: 0,
-                createdAt: now,
-                ttl: now + config.JOURNAL_TTL_DAYS * 24 * 3600,
-              },
-              ConditionExpression: "attribute_not_exists(seq)",
-            }),
-          );
+          try {
+            await docClient.send(
+              new PutCommand({
+                TableName: tableName("doc_updates"),
+                Item: {
+                  docId,
+                  seq,
+                  update: Buffer.from(deltaUpdate),
+                  writerId: body.byWriterId || "system",
+                  billedChars: 0,
+                  createdAt: now,
+                  ttl: now + config.JOURNAL_TTL_DAYS * 24 * 3600,
+                },
+                ConditionExpression: "attribute_not_exists(seq)",
+              }),
+            );
+            state.latestSeq = Math.max(state.latestSeq, seq);
+          } finally {
+            state.inFlight.delete(seq);
+          }
         }
 
         const result = await persistDocumentSnapshot(docId, targetDoc, "restore", body.byWriterId);

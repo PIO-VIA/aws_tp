@@ -90,9 +90,51 @@ export async function getHead(docId: string): Promise<DocHead> {
     return fullHead;
   }
 
-  // Si pas d'updates et pas de head, mais peut-être un snapshot existant ou document vierge
-  if (!existingHead && latestSeq === undefined) {
-    // Document vierge par défaut
+  // Si le journal est vide mais qu'on a déjà un head valide
+  if (existingHead && latestSeq === undefined) {
+    let text = existingHead.text;
+    if (!text && existingHead.textKey) {
+      const buf = await getObjectBuffer(existingHead.textKey);
+      text = buf ? buf.toString("utf-8") : "";
+    }
+    const fullHead: DocHead = {
+      ...existingHead,
+      versionId: existingHead.versionId || existingHead.textHash || computeVersionId(text || ""),
+      text: text || "",
+    };
+    coalesceCache.set(docId, { head: fullHead, cachedAt: now });
+    return fullHead;
+  }
+
+  // 3. Reconstruire (dernier snapshot + journal > max(0, baseSeq - REPLAY_MARGIN)) dans un Y.Doc
+  const ydoc = new Y.Doc();
+  let baseSeq = 0;
+
+  // Charger le dernier snapshot s'il existe
+  const snapshotsTable = tableName("doc_snapshots");
+  const snapRes = await docClient.send(
+    new QueryCommand({
+      TableName: snapshotsTable,
+      KeyConditionExpression: "docId = :docId",
+      ExpressionAttributeValues: { ":docId": docId },
+      ScanIndexForward: false,
+      Limit: 1,
+    }),
+  );
+
+  const latestSnap = snapRes.Items?.[0];
+  let hasSnapshot = false;
+  if (latestSnap?.s3Key) {
+    const snapBuf = await getObjectBuffer(latestSnap.s3Key);
+    if (snapBuf) {
+      Y.applyUpdate(ydoc, new Uint8Array(snapBuf));
+      baseSeq = (latestSnap.upToSeq as number) || 0;
+      hasSnapshot = true;
+    }
+  }
+
+  // Si pas d'updates et pas de snapshot : document vierge par défaut
+  if (!hasSnapshot && latestSeq === undefined) {
     const defaultText = "";
     const versionId = computeVersionId(defaultText);
     const textKey = `texts/${docId}/${versionId}.txt`;
@@ -113,33 +155,8 @@ export async function getHead(docId: string): Promise<DocHead> {
     return head;
   }
 
-  // 3. Reconstruire (dernier snapshot + journal > upToSeq) dans un Y.Doc
-  const ydoc = new Y.Doc();
-  let baseSeq = 0;
-
-  // Charger le dernier snapshot s'il existe
-  const snapshotsTable = tableName("doc_snapshots");
-  const snapRes = await docClient.send(
-    new QueryCommand({
-      TableName: snapshotsTable,
-      KeyConditionExpression: "docId = :docId",
-      ExpressionAttributeValues: { ":docId": docId },
-      ScanIndexForward: false,
-      Limit: 1,
-    }),
-  );
-
-  const latestSnap = snapRes.Items?.[0];
-  if (latestSnap?.s3Key) {
-    const snapBuf = await getObjectBuffer(latestSnap.s3Key);
-    if (snapBuf) {
-      Y.applyUpdate(ydoc, new Uint8Array(snapBuf));
-      baseSeq = (latestSnap.upToSeq as number) || 0;
-    }
-  }
-
-  // Rejouer le journal d'updates > baseSeq
-  let startSeq = baseSeq;
+  // Rejouer le journal d'updates > max(0, baseSeq - REPLAY_MARGIN)
+  let startSeq = Math.max(0, baseSeq - config.REPLAY_MARGIN);
   let hasMore = true;
   let maxSeqEncountered = baseSeq;
 

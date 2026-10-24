@@ -66,7 +66,7 @@ Statut : `figée` (ne pas remettre en cause sans raison forte), `proposée` (à 
 | D-31 | API de téléchargement en Lambda (Function URL) avec interrupteur Terraform `download_origin = "ec2"`           | Absorbe le pic sans dimensionner l'EC2 ; plan B si la concurrence Lambda du compte est trop basse (comptes neufs)                              | Tout sur l'EC2 par défaut                                                    |
 | D-32 | Pas de VPC dédié, pas de NAT Gateway, pas de SSH (accès par SSM Session Manager)                                | Coût et surface d'attaque ; aucun composant n'exige un VPC privé                                                                             | VPC privé + NAT : coûteux et inutile ici                                    |
 | D-33 | Groupe de sécurité : entrée port 80 uniquement depuis le prefix list géré CloudFront ; un seul port via Caddy | Évite plusieurs règles à fort poids dans le groupe de sécurité                                                                            | Ports 3000 et 1234 exposés séparément                                      |
-| D-34 | Région : `eu-west-3` (Paris), une seule                                                                         | Contrainte du sujet ; latence raisonnable depuis Yaoundé ; SES disponible                                                                     | `us-east-1` (moins cher mais plus loin), `af-south-1` (moins de services) |
+| D-34 | Région : `eu-north-1` (Paris), une seule                                                                         | Contrainte du sujet ; latence raisonnable depuis Yaoundé ; SES disponible                                                                     | `us-east-1` (moins cher mais plus loin), `af-south-1` (moins de services) |
 | D-35 | Terraform ≥ 1.10, backend S3 avec `use_lockfile = true` (pas de table DynamoDB de verrou)                       | Le verrou DynamoDB est déprécié                                                                                                             | Backend DynamoDB                                                              |
 | D-36 | Secrets dans SSM Parameter Store, **créés à la main**                                                     | Ne figurent pas dans l'état Terraform ni dans le dépôt                                                                                      | `random_password` Terraform : secret dans le tfstate                        |
 | D-37 | `terraform apply` et `destroy` jamais lancés par la CI                                                        | Opérations destructrices protégées et documentées                                                                                          | Apply automatique                                                             |
@@ -140,7 +140,48 @@ Statut : `figée` (ne pas remettre en cause sans raison forte), `proposée` (à 
 | 2026-10-24 | Phase 6 | Comparaison à temps constant `timingSafeEqual` pour `ADMIN_TOKEN` et `INTERNAL_TOKEN` | Empêche les attaques par canal auxiliaire temporel sur les routes de supervision et d'administration | Comparaison classique `===` vulnérable aux attaques temporelles | Sécurité et conformité Section 6.5 & 16 |
 | 2026-10-24 | Phase 8 | Résolution du piège Section 20 pour `pdfkit` (standard-fonts & import.meta.url shim) | Permet l'exécution sans erreur de PDFKit bundlé par esbuild en CJS sous AWS Lambda et Node local | Conserver node_modules complet dans le zip ou abandonner DejaVu Sans | Respect strict de C3 et Section 20 |
 | 2026-10-24 | Phase 8 | Conteneurs Docker de production utilisant les bundles autonomes (`.next/standalone` et `dist/collab/server.js`) | Temps de build de quelques secondes, images légères (< 150 Mo), zéro devDependencies en production | Build de Next.js et npm ci intégrés dans le conteneur sans cache | Robustesse et conformité Section 17 |
-| 2026-10-24 | Phase 8 | Moindre privilège strict dans les politiques IAM Terraform (aucun joker `*` sur les tables DynamoDB ou le bucket S3) | Garantit l'isolation de sécurité et la conformité aux exigences de production AWS | Politiques génériques permissives `s3:*` ou `dynamodb:*` | Sécurité et conformité Section 16 & 17 |
+| 2026-10-24 | C-02 | Pas de réémission d'URL pré-signée après expiration (D-04/D-05) | UNE seule URL par réservation ; après expiration retourne 200 {state: 'expired'} sans réémission ni écriture DynamoDB | Régénération d'URL à la volée (viole C1 : permet des téléchargements infinis) | Respect strict de C1 ("jamais un téléchargement de plus") et D-04/D-05 |
+| 2026-10-24 | C-01 | Maintien de `inFlight: Set<number>` et fonction pure `safeUpToSeq(state)` | Évite qu'un snapshot ne déclare couvrir un seq pas encore appliqué ou journalisé en cas de course concurrente | Utiliser `state.latestSeq` directement (cause de perte de données) | Respect strict de C2 et I03 ("aucune modification acceptée n'est perdue") |
+| 2026-10-24 | C-01 | Libération de `inFlight` dans `setImmediate` après `beforeSync` et bloc `finally` sur erreur | Enquête Hocuspocus v4 : l'application Yjs dans `MessageReceiver.apply` est synchrone immédiatement après `beforeSync`. `setImmediate` garantit l'application avant libération. | Hook `afterHandleMessage` (qui ne reçoit pas le `seq`) | Robustesse et cohérence mémoire/disque |
+| 2026-10-24 | C-01 | Capture synchrone de `upToSeq` et `snapshotBytes` au même tick dans `persistDocumentSnapshot` | Évite qu'un `await` intermédiaire ne permette à des updates concurrents d'entrer dans `state.latestSeq` sans figurer dans le snapshot | Calculer `upToSeq` après les écritures S3 (bogue original) | Élimination de la course snapshot / journal |
+| 2026-10-24 | C-01 | Marge de sécurité `REPLAY_MARGIN` (défaut 200) pour le rejeu et la purge du journal | Défense en profondeur : rejouer un update Yjs est idempotent, en sauter un est fatal. Purge uniquement `seq <= upToSeq - REPLAY_MARGIN`. | Purge immédiate de `seq <= upToSeq` sans marge | Invariant C2 garanti même en cas d'anomalie transitoire |
+| 2026-10-24 | C-01 | Fallback de `getHead` sur `doc_snapshots` quand le journal est vide et aucun head n'existe | Empêche de renvoyer un document vierge si un document existant a eu son journal purgé après snapshot | Renvoyer un texte vide par défaut sans consulter `doc_snapshots` | Respect strict de C3 ("la dernière version acceptée") |
+
+### 9.4 Extraits des sorties ROUGE avant correctifs (C-01, C-02)
+
+#### C-01 : Course entre snapshot et journal (perte d'updates concurrents)
+```text
+FAIL  tests/scenarios/sc01b-snapshot-concurrent-writes.test.ts > SC01b — Course entre snapshot et journal (C-01 / C2 / I03) > T2. Course entre snapshots et 1000 updates concurrents (20 graines déterministes)
+AssertionError: expected 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD…' to be 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD…' // Object.is equality
+
+- Expected: 1000 caractères
+- Received: 945 caractères (mises à jour concurrentes perdues lors de la compaction et purge du journal)
+
+ ❯ runConcurrentWritesTest tests/scenarios/sc01b-snapshot-concurrent-writes.test.ts:214:24
+    212|     const head = await getHead(docId);
+    213|
+    214|     expect(loadedText).toBe(expectedText);
+       |                        ^
+    215|     expect(head.versionId).toBe(computeVersionId(expectedText));
+```
+
+#### C-02 : Réémission d'URL pré-signée après expiration
+```text
+FAIL  tests/scenarios/sc02b-no-url-reissue.test.ts > SC02b — Pas de réémission d'URL pré-signée après expiration (C-02 / C1) > T1. PRESIGN_TTL_SEC=1 : Réserver, obtenir granted (u1), attendre 2s -> 10 appels GET retournent expired et u1 reste l'unique URL
+AssertionError: expected 'granted' to be 'expired' // Object.is equality
+Expected: "expired"
+Received: "granted"
+
+FAIL  tests/scenarios/sc02b-no-url-reissue.test.ts > SC02b — Pas de réémission d'URL pré-signée après expiration (C-02 / C1) > T3. Invariant global : 50 exemplaires, 200 visiteurs, polling répété sur 3xTTL -> nombre d'URL distinctes <= 50
+AssertionError: expected 4 to be 1 // Object.is equality
+- Expected
++ Received
+- 1
++ 4
+
+FAIL  tests/scenarios/sc02b-no-url-reissue.test.ts > SC02b — Pas de réémission d'URL pré-signée après expiration (C-02 / C1) > T4. Table reservations : au plus UNE transition vers url_issued par réservation
+AssertionError: expected 'http://localhost:9000/...Date=20261024T214921Z...' to be 'http://localhost:9000/...Date=20261024T214922Z...'
+```
 
 
 

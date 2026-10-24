@@ -8,7 +8,7 @@ set -euo pipefail
 
 TAG="${1:-}"
 INSTANCE_ID="${2:-${INSTANCE_ID:-}}"
-REGION="${3:-${AWS_REGION:-eu-west-3}}"
+REGION="${3:-${AWS_REGION:-eu-north-1}}"
 
 if [ -z "${TAG}" ]; then
     echo "Usage: $0 <TAG> [INSTANCE_ID] [AWS_REGION]" >&2

@@ -6,7 +6,7 @@ set -euo pipefail
 # Usage: ./scripts/deploy/build-and-push.sh [AWS_REGION] [ECR_APP_URL] [ECR_COLLAB_URL]
 # ------------------------------------------------------------------------------
 
-REGION="${1:-${AWS_REGION:-eu-west-3}}"
+REGION="${1:-${AWS_REGION:-eu-north-1}}"
 APP_REPO="${2:-${ECR_APP_URL:-}}"
 COLLAB_REPO="${3:-${ECR_COLLAB_URL:-}}"
 

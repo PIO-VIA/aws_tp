@@ -1,4 +1,4 @@
-aws_region                  = "eu-west-3"
+aws_region                  = "eu-north-1"
 project                     = "editeur-collab"
 environment                 = "dev"
 alert_email                 = "admin@example.org"

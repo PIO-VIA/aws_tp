@@ -17,7 +17,7 @@ if [ -f /opt/app/.env ]; then
     source /opt/app/.env
 fi
 
-AWS_REGION="${AWS_REGION:-eu-west-3}"
+AWS_REGION="${AWS_REGION:-eu-north-1}"
 ECR_APP_URL="${ECR_APP_URL:-}"
 
 # 2. Authentification ECR
