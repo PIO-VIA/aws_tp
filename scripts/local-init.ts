@@ -9,9 +9,10 @@ import {
   DescribeTableCommand,
   UpdateTimeToLiveCommand,
   CreateTableCommandInput,
+  ListTablesCommand,
 } from "@aws-sdk/client-dynamodb";
-import { CreateBucketCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
-import { CreateQueueCommand, GetQueueUrlCommand } from "@aws-sdk/client-sqs";
+import { CreateBucketCommand, HeadBucketCommand, ListBucketsCommand } from "@aws-sdk/client-s3";
+import { CreateQueueCommand, GetQueueUrlCommand, ListQueuesCommand } from "@aws-sdk/client-sqs";
 import { getConfig, tableName, TableKey } from "../src/shared/config";
 import { getDynamoDBClient } from "../src/shared/aws/dynamodb";
 import { getS3Client } from "../src/shared/aws/s3";
@@ -257,8 +258,65 @@ export async function initSQSQueues() {
   }
 }
 
+export async function waitForServices(maxRetries = 30, delayMs = 1000) {
+  const ddb = getDynamoDBClient();
+  const s3 = getS3Client();
+  const sqs = getSQSClient();
+
+  console.log("[Init] Vérification de la disponibilité des services locaux...");
+
+  // 1. DynamoDB
+  for (let i = 1; i <= maxRetries; i++) {
+    try {
+      await ddb.send(new ListTablesCommand({ Limit: 1 }));
+      console.log("[Init] DynamoDB est prêt.");
+      break;
+    } catch (err) {
+      if (i === maxRetries) {
+        console.error("[Init] Timeout: DynamoDB n'a pas répondu à temps.");
+        throw err;
+      }
+      console.log(`[Init] DynamoDB démarre encore... nouvelle tentative (${i}/${maxRetries})`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // 2. S3 (MinIO)
+  for (let i = 1; i <= maxRetries; i++) {
+    try {
+      await s3.send(new ListBucketsCommand({}));
+      console.log("[Init] MinIO (S3) est prêt.");
+      break;
+    } catch (err) {
+      if (i === maxRetries) {
+        console.error("[Init] Timeout: MinIO n'a pas répondu à temps.");
+        throw err;
+      }
+      console.log(`[Init] MinIO démarre encore... nouvelle tentative (${i}/${maxRetries})`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // 3. SQS (ElasticMQ)
+  for (let i = 1; i <= maxRetries; i++) {
+    try {
+      await sqs.send(new ListQueuesCommand({ MaxResults: 1 }));
+      console.log("[Init] ElasticMQ (SQS) est prêt.");
+      break;
+    } catch (err) {
+      if (i === maxRetries) {
+        console.error("[Init] Timeout: ElasticMQ n'a pas répondu à temps.");
+        throw err;
+      }
+      console.log(`[Init] ElasticMQ démarre encore... nouvelle tentative (${i}/${maxRetries})`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 async function main() {
   console.log("=== Initialisation de l'environnement local ===");
+  await waitForServices();
   await initDynamoDBTables();
   await initS3Bucket();
   await initSQSQueues();

@@ -82,7 +82,9 @@ jobs:
         run: npm run test
 
       - name: Démarrage des conteneurs locaux (DynamoDB, MinIO, ElasticMQ, Mailpit)
-        run: npm run local:up
+        run: |
+          npm run local:up
+          sleep 3
 
       - name: Initialisation des ressources locales
         run: npm run local:init
