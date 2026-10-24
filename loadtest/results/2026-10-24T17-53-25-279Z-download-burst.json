@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-10-24T17:53:25.279Z",
+  "testName": "download-burst",
+  "config": {
+    "totalVisitors": 1000,
+    "maxCopies": 100,
+    "burstRatio": 0.8,
+    "concurrency": 40,
+    "targetUrl": "http://127.0.0.1:3456/api/dl/eI4B8dtCF3D_0FaYurraZA/request"
+  },
+  "metrics": {
+    "totalRequests": 1000,
+    "grantedCount": 100,
+    "exhaustedCount": 900,
+    "failedCount": 0,
+    "errors5xxCount": 0,
+    "unhandledCount": 0,
+    "latenciesMs": {
+      "min": 23,
+      "p50": 50,
+      "p90": 733,
+      "p95": 1113,
+      "p99": 1780,
+      "max": 2014,
+      "mean": 176.7
+    },
+    "totalDurationSec": 4.5,
+    "throughputReqSec": 224.1
+  },
+  "invariants": {
+    "c1RespectStrict": true,
+    "zeroUnhandledRequests": true,
+    "zeroErrors5xx": true,
+    "p95UnderTarget": false
+  }
+}

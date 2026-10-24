@@ -1,0 +1,14 @@
+aws_region                  = "eu-west-3"
+project                     = "editeur-collab"
+environment                 = "dev"
+alert_email                 = "admin@example.org"
+ses_sender                  = "journal@example.org"
+ses_recipients              = ["destinataire@example.org"]
+ec2_instance_type           = "t3.small"
+download_origin             = "lambda"
+lambda_reserved_concurrency = null
+monthly_budget_usd          = 10
+github_repo                 = "mon-compte/editeur-collaboratif"
+enable_github_oidc          = false
+data_bucket_force_destroy   = true
+pdf_presign_ttl_sec         = 60

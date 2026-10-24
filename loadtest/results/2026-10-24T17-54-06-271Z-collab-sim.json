@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-10-24T17:54:06.270Z",
+  "testName": "collab-sim",
+  "config": {
+    "totalWriters": 30,
+    "docCount": 2,
+    "typingBursts": 3,
+    "collabPort": 1240
+  },
+  "metrics": {
+    "totalEditsSent": 90,
+    "totalPropagationsObserved": 1260,
+    "writeRefusedCount": 0,
+    "convergenceMatch": true,
+    "finalTextLengths": [
+      2490,
+      2490
+    ],
+    "latenciesMs": {
+      "min": 66,
+      "p50": 109,
+      "p90": 144,
+      "p95": 147,
+      "p99": 149,
+      "max": 150,
+      "mean": 115.6
+    },
+    "cpuUsage": {
+      "userMs": 2245,
+      "systemMs": 193
+    },
+    "memoryMb": {
+      "rss": 207,
+      "heapUsed": 61
+    },
+    "durationSec": 5.2
+  },
+  "invariants": {
+    "c2ConvergenceStrict": true,
+    "zeroWriteLoss": true,
+    "p95UnderTarget": true
+  }
+}

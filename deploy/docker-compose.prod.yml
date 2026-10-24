@@ -1,0 +1,46 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - next
+      - collab
+    networks:
+      - app-network
+
+  next:
+    image: ${ECR_APP_URL:-editeur-app}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/app/.env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - COLLAB_INTERNAL_URL=http://collab:1235
+    expose:
+      - "3000"
+    networks:
+      - app-network
+
+  collab:
+    image: ${ECR_COLLAB_URL:-editeur-collab}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - /opt/app/.env
+    environment:
+      - NODE_ENV=production
+      - COLLAB_PORT=1234
+      - COLLAB_INTERNAL_PORT=1235
+    expose:
+      - "1234"
+      - "1235"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

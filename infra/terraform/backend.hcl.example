@@ -1,0 +1,7 @@
+# Exemple de configuration du backend S3 avec verrouillage natif Terraform >= 1.10
+# Usage : terraform init -backend-config=backend.hcl
+
+bucket       = "editeur-collab-tfstate-123456789012"
+key          = "editeur-collab/dev/terraform.tfstate"
+region       = "eu-west-3"
+use_lockfile = true

@@ -1,0 +1,16 @@
+:80 {
+    log {
+        output stdout
+        format json
+    }
+
+    # Redirection WebSocket Hocuspocus : strip du préfixe /collab
+    handle_path /collab* {
+        reverse_proxy collab:1234
+    }
+
+    # Toutes les autres requêtes vers l'application Next.js
+    handle {
+        reverse_proxy next:3000
+    }
+}

@@ -32,6 +32,18 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# builds and lambdas
+/dist/
+
+# terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+backend.hcl
+*.tfvars
+!*.tfvars.example
 
 # vercel
 .vercel

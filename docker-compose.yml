@@ -1,0 +1,36 @@
+# Services locaux uniquement (émulation des services AWS).
+# L'application (Next.js, collab, workers) tourne sur l'hôte via `npm run dev`.
+name: editeur-local
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8000:8000"
+
+  minio:
+    # L'image officielle minio/minio n'est plus distribuée : fork communautaire
+    # de MinIO (même API S3, mêmes options).
+    image: pgsty/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: local
+      MINIO_ROOT_PASSWORD: localpassword
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  elasticmq:
+    image: softwaremill/elasticmq-native:latest
+    volumes:
+      - ./scripts/elasticmq.conf:/opt/elasticmq.conf:ro
+    ports:
+      - "9324:9324"
+      - "9325:9325"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"

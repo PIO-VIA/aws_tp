@@ -1,0 +1,123 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "src/**"
+      - "collab/**"
+      - "lambdas/**"
+      - "scripts/**"
+      - "deploy/**"
+      - "infra/terraform/**"
+      - "package*.json"
+      - ".github/workflows/**"
+  push:
+    branches:
+      - main
+
+jobs:
+  validate-and-test:
+    name: Lint, Test & Validate Infrastructure
+    runs-on: ubuntu-latest
+
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+
+      minio:
+        image: minio/minio:latest
+        ports:
+          - 9000:9000
+          - 9001:9001
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadminpassword
+        options: >-
+          server /data --console-address ":9001"
+
+      elasticmq:
+        image: softwaremill/elasticmq-native:latest
+        ports:
+          - 9324:9324
+          - 9325:9325
+
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    env:
+      APP_ENV: local
+      DDB_ENDPOINT: http://127.0.0.1:8000
+      S3_ENDPOINT: http://127.0.0.1:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_BUCKET: editeur-local-data
+      SQS_ENDPOINT: http://127.0.0.1:9324
+      PDF_QUEUE_URL: http://127.0.0.1:9324/000000000000/pdf-jobs
+      PDF_DLQ_URL: http://127.0.0.1:9324/000000000000/pdf-jobs-dlq
+      TABLE_PREFIX: ci-test-
+      SESSION_SECRET: dev-session-secret-change-in-prod-at-least-32-chars
+      INTERNAL_TOKEN: dev-internal-token-change-in-prod
+      ADMIN_TOKEN: dev-admin-token-change-in-prod
+      MAIL_DRIVER: smtp
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      MAIL_FROM: journal@asso.fr
+      AWS_REGION: eu-west-3
+      AWS_ACCESS_KEY_ID: mock-key
+      AWS_SECRET_ACCESS_KEY: mock-secret
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration de Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Configuration de Terraform >= 1.10
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+
+      - name: Installation des dépendances
+        run: npm ci
+
+      - name: Vérification du format Terraform
+        run: terraform -chdir=infra/terraform fmt -check
+
+      - name: Initialisation Terraform (sans backend)
+        run: terraform -chdir=infra/terraform init -backend=false
+
+      - name: Validation du code Terraform
+        run: terraform -chdir=infra/terraform validate
+
+      - name: Linting (ESLint)
+        run: npm run lint
+
+      - name: Vérification des types TypeScript
+        run: npm run typecheck
+
+      - name: Tests unitaires
+        run: npm run test
+
+      - name: Initialisation des ressources locales
+        run: npm run local:init
+
+      - name: Build des bundles Lambdas
+        run: npm run build:lambdas
+
+      - name: Tests d'intégration (dont bundle réel pdf-worker)
+        run: npm run test:integration
+
+      - name: Tests de scénarios (SC01 à SC06)
+        run: npm run test:scenarios
+
+      - name: Audit de sécurité npm
+        run: npm audit --audit-level=high

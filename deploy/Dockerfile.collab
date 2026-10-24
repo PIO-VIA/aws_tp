@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+
+# ------------------------------------------------------------------------------
+# Image de production pour le serveur de collaboration Hocuspocus
+# Reçoit le bundle autonome dist/collab/server.js généré par esbuild
+# ------------------------------------------------------------------------------
+FROM node:22-slim AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV COLLAB_PORT=1234
+ENV COLLAB_INTERNAL_PORT=1235
+
+# Utilisateur non-root
+RUN groupadd --system --gid 1001 collabgroup && \
+    useradd --system --uid 1001 -g collabgroup collabuser
+
+COPY --chown=collabuser:collabgroup dist/collab/server.js ./server.js
+
+USER collabuser
+
+EXPOSE 1234 1235
+
+CMD ["node", "server.js"]

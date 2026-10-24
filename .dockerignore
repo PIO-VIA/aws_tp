@@ -1,0 +1,16 @@
+node_modules
+.next/*
+!.next/standalone
+!.next/standalone/**
+!.next/static
+!.next/static/**
+dist/*
+!dist/collab
+!dist/collab/**
+.git
+.agents
+.env*
+*.log
+npm-debug.log*
+.DS_Store
+loadtest/results

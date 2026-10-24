@@ -1,0 +1,523 @@
+openapi: 3.1.0
+info:
+  title: API Éditeur Collaboratif & Téléchargement Versionné
+  description: >
+    API complète pour la gestion collaborative de documents en texte brut (CRDT Yjs),
+    l'attribution de quotas stricts en caractères UTF-16, la génération de PDF déterministes,
+    et le téléchargement sous réserve atomique d'exemplaires limités (C1).
+  version: 1.0.0
+  contact:
+    name: Équipe Ingénierie
+    email: contact@example.org
+
+servers:
+  - url: http://localhost:3000
+    description: Environnement de développement local
+  - url: https://{distributionId}.cloudfront.net
+    description: Environnement de production AWS via CloudFront
+    variables:
+      distributionId:
+        default: d111111abcdef8
+
+paths:
+  # ----------------------------------------------------------------------------
+  # Authentification & Sessions
+  # ----------------------------------------------------------------------------
+  /api/session:
+    post:
+      summary: Création de session rédacteur
+      description: Crée un profil rédacteur et dépose un cookie de session HttpOnly (HS256).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email]
+              properties:
+                name:
+                  type: string
+                  minLength: 2
+                  maxLength: 50
+                  example: "Alice Martin"
+                email:
+                  type: string
+                  format: email
+                  example: "alice@asso.fr"
+      responses:
+        '200':
+          description: Session établie avec succès
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "session=eyJhbGci...; Path=/; HttpOnly; SameSite=Lax"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  writer:
+                    $ref: '#/components/schemas/Writer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    get:
+      summary: Consultation de la session courante
+      description: Retourne le rédacteur authentifié et son crédit UTF-16 restant pour aujourd'hui.
+      responses:
+        '200':
+          description: Informations de session et quota
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  writer:
+                    $ref: '#/components/schemas/Writer'
+                  credit:
+                    type: object
+                    properties:
+                      usedChars:
+                        type: integer
+                        example: 1250
+                      remainingChars:
+                        type: integer
+                        example: 8750
+                      dailyQuota:
+                        type: integer
+                        example: 10000
+                      isBlocked:
+                        type: boolean
+                        example: false
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    delete:
+      summary: Déconnexion
+      description: Révoque la session et efface le cookie.
+      responses:
+        '200':
+          description: Déconnecté avec succès
+
+  /api/session/collab-token:
+    get:
+      summary: Obtention d'un jeton WebSocket court
+      description: Émet un jeton éphémère (TTL 60s) pour l'authentification Hocuspocus WebSocket.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: "eyJhbGciOi..."
+                  expiresAt:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ----------------------------------------------------------------------------
+  # Documents & Partage
+  # ----------------------------------------------------------------------------
+  /api/documents:
+    get:
+      summary: Liste des documents accessibles
+      description: Retourne la liste des documents dont le rédacteur est propriétaire ou invité.
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DocumentSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      summary: Création d'un document
+      description: Crée un nouveau document vide rattaché au rédacteur courant comme propriétaire.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  example: "Procès-verbal d'assemblée"
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  docId:
+                    type: string
+                    example: "doc-94d9318e-630c-4ae5-9e1c-3dcb54c76948"
+                  title:
+                    type: string
+                    example: "Procès-verbal d'assemblée"
+                  role:
+                    type: string
+                    example: "owner"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/documents/{docId}:
+    get:
+      summary: Détail d'un document
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetail'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/documents/{docId}/share:
+    post:
+      summary: Partager un document
+      description: Seul le propriétaire peut inviter un autre rédacteur (rôle editor ou viewer).
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetEmail, role]
+              properties:
+                targetEmail:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum: [editor, viewer]
+      responses:
+        '200':
+          description: Partage appliqué avec succès
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/documents/{docId}/links:
+    post:
+      summary: Créer un lien de téléchargement limité (C1)
+      description: Génère un lien public avec un quota d'exemplaires `maxDownloads`.
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [maxDownloads]
+              properties:
+                maxDownloads:
+                  type: integer
+                  minimum: 1
+                  maximum: 1000
+                  example: 50
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadLink'
+
+  # ----------------------------------------------------------------------------
+  # Téléchargements Publics (C1 / C3)
+  # ----------------------------------------------------------------------------
+  /api/dl/{linkId}/status:
+    get:
+      summary: État de disponibilité d'un lien public
+      parameters:
+        - $ref: '#/components/parameters/LinkId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    enum: [available, exhausted, revoked]
+                  remaining:
+                    type: integer
+                  total:
+                    type: integer
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/dl/{linkId}/request:
+    post:
+      summary: Demande atomique de téléchargement (C1)
+      description: >
+        Tente de réserver un exemplaire de manière strictement atomique (C1).
+        Si disponible, déclenche ou rattache la génération PDF (C3).
+      parameters:
+        - $ref: '#/components/parameters/LinkId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId:
+                  type: string
+                  format: uuid
+                  example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+      responses:
+        '200':
+          description: Exemplaire disponible immédiatement avec URL pré-signée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    example: "issued"
+                  downloadUrl:
+                    type: string
+                    example: "https://bucket.s3.amazonaws.com/pdfs/doc/ver.pdf?AWSAccessKeyId=..."
+        '202':
+          description: Réservation acceptée, génération PDF en cours (polling nécessaire)
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                example: 2
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    example: "preparing"
+                  reservationId:
+                    type: string
+        '410':
+          description: Quota d'exemplaires épuisé (C1 respecté)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    example: "exhausted"
+
+  /api/dl/{linkId}/reservations/{reservationId}:
+    get:
+      summary: Polling de livraison d'un exemplaire réservé
+      parameters:
+        - $ref: '#/components/parameters/LinkId'
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: PDF prêt et URL pré-signée émise
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    example: "issued"
+                  downloadUrl:
+                    type: string
+        '202':
+          description: Rendu PDF toujours en cours
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                example: 2
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    example: "preparing"
+
+  # ----------------------------------------------------------------------------
+  # Historique et Restauration (F10)
+  # ----------------------------------------------------------------------------
+  /api/documents/{docId}/versions:
+    get:
+      summary: Liste des versions et instantanés d'un document
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DocVersion'
+
+  /api/documents/{docId}/versions/{versionId}/restore:
+    post:
+      summary: Restauration d'une version passée
+      description: >
+        Restaure le document à un état passé. N'impute aucun crédit UTF-16 (I08).
+        Limité à 10 restaurations par heure par rédacteur.
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Document restauré et diffusé à tous les collaborateurs
+        '429':
+          description: Limite de taux dépassée (> 10 restaurations/heure)
+
+components:
+  parameters:
+    DocId:
+      name: docId
+      in: path
+      required: true
+      schema:
+        type: string
+    LinkId:
+      name: linkId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    Writer:
+      type: object
+      properties:
+        writerId:
+          type: string
+          example: "8ebc0d4900327e376558f8ab5f1a40c0b1d0b5bd7acb4cda00e30956e7ba5c90"
+        name:
+          type: string
+          example: "Alice Martin"
+        email:
+          type: string
+          example: "alice@asso.fr"
+
+    DocumentSummary:
+      type: object
+      properties:
+        docId:
+          type: string
+        title:
+          type: string
+        ownerId:
+          type: string
+        role:
+          type: string
+          enum: [owner, editor, viewer]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    DocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/DocumentSummary'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items:
+                type: object
+                properties:
+                  writerId:
+                    type: string
+                  role:
+                    type: string
+
+    DownloadLink:
+      type: object
+      properties:
+        linkId:
+          type: string
+          example: "03vyUn6EKTwHPxh1LlA1mQ"
+        docId:
+          type: string
+        maxDownloads:
+          type: integer
+          example: 50
+        issued:
+          type: integer
+          example: 0
+        status:
+          type: string
+          enum: [active, revoked]
+        url:
+          type: string
+          example: "http://localhost:3000/d/03vyUn6EKTwHPxh1LlA1mQ"
+
+    DocVersion:
+      type: object
+      properties:
+        versionId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        charCount:
+          type: integer
+        previewSnippet:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Requête mal formée ou schéma invalide
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+    Unauthorized:
+      description: Session non authentifiée ou expirée
+    Forbidden:
+      description: Permissions insuffisantes pour cette opération
+    NotFound:
+      description: Ressource introuvable ou révoquée
