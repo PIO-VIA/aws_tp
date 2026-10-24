@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, useRef } from "react";
+import { use, useEffect, useState, useRef, useCallback } from "react";
 
 type DlState =
   | "checking"
@@ -38,6 +38,70 @@ export default function DownloadPage({
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerDownload = useCallback((url: string) => {
+    // 1. Iframe cachée : méthode standard pour déclencher un téléchargement d'attachment
+    // sans quitter la page et sans être bloqué par les politiques de clic asynchrone des navigateurs
+    try {
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      setTimeout(() => {
+        try {
+          document.body.removeChild(iframe);
+        } catch {}
+      }, 30000);
+    } catch {}
+
+    // 2. Navigation directe de secours (puisque Content-Disposition: attachment, la page reste active)
+    try {
+      window.location.assign(url);
+    } catch {
+      window.location.href = url;
+    }
+  }, []);
+
+  const startPollingReservation = useCallback((resId: string, initialRetryMs = 1500) => {
+    setState("preparing");
+    setMessage("Réservation acceptée. Préparation du PDF en cours...");
+
+    const poll = async (retryMs: number) => {
+      try {
+        const res = await fetch(`/api/dl/${linkId}/reservations/${resId}`);
+        const data = await res.json();
+
+        if (data.state === "granted" && data.url) {
+          setState("granted");
+          setDownloadUrl(data.url);
+          setFilename(data.filename ?? "document.pdf");
+          setMessage("Votre document est prêt ! Téléchargement en cours...");
+          triggerDownload(data.url);
+          return;
+        }
+
+        if (data.state === "failed") {
+          setState("failed");
+          setMessage("La préparation a échoué. Votre réservation a été remboursée. Vous pouvez réessayer.");
+          return;
+        }
+
+        if (data.state === "expired") {
+          setState("expired");
+          setMessage("L'autorisation de téléchargement a expiré.");
+          return;
+        }
+
+        // Toujours en préparation
+        const nextMs = data.retryAfterMs || Math.round(retryMs * 1.2);
+        pollingRef.current = setTimeout(() => poll(nextMs), nextMs);
+      } catch {
+        pollingRef.current = setTimeout(() => poll(2000), 2000);
+      }
+    };
+
+    pollingRef.current = setTimeout(() => poll(initialRetryMs), initialRetryMs);
+  }, [linkId, triggerDownload]);
 
   // Vérification initiale : vérifie si l'utilisateur a déjà une réservation, sinon l'état du lien
   useEffect(() => {
@@ -100,71 +164,7 @@ export default function DownloadPage({
       if (pollingRef.current) clearTimeout(pollingRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [linkId, requestId]);
-
-  const triggerDownload = (url: string) => {
-    // 1. Iframe cachée : méthode standard pour déclencher un téléchargement d'attachment
-    // sans quitter la page et sans être bloqué par les politiques de clic asynchrone des navigateurs
-    try {
-      const iframe = document.createElement("iframe");
-      iframe.style.display = "none";
-      iframe.src = url;
-      document.body.appendChild(iframe);
-      setTimeout(() => {
-        try {
-          document.body.removeChild(iframe);
-        } catch {}
-      }, 30000);
-    } catch {}
-
-    // 2. Navigation directe de secours (puisque Content-Disposition: attachment, la page reste active)
-    try {
-      window.location.assign(url);
-    } catch {
-      window.location.href = url;
-    }
-  };
-
-  const startPollingReservation = (resId: string, initialRetryMs = 1500) => {
-    setState("preparing");
-    setMessage("Réservation acceptée. Préparation du PDF en cours...");
-
-    const poll = async (retryMs: number) => {
-      try {
-        const res = await fetch(`/api/dl/${linkId}/reservations/${resId}`);
-        const data = await res.json();
-
-        if (data.state === "granted" && data.url) {
-          setState("granted");
-          setDownloadUrl(data.url);
-          setFilename(data.filename ?? "document.pdf");
-          setMessage("Votre document est prêt ! Téléchargement en cours...");
-          triggerDownload(data.url);
-          return;
-        }
-
-        if (data.state === "failed") {
-          setState("failed");
-          setMessage("La préparation a échoué. Votre réservation a été remboursée. Vous pouvez réessayer.");
-          return;
-        }
-
-        if (data.state === "expired") {
-          setState("expired");
-          setMessage("L'autorisation de téléchargement a expiré.");
-          return;
-        }
-
-        // Toujours en préparation
-        const nextMs = data.retryAfterMs || Math.round(retryMs * 1.2);
-        pollingRef.current = setTimeout(() => poll(nextMs), nextMs);
-      } catch {
-        pollingRef.current = setTimeout(() => poll(2000), 2000);
-      }
-    };
-
-    pollingRef.current = setTimeout(() => poll(initialRetryMs), initialRetryMs);
-  };
+  }, [linkId, requestId, startPollingReservation]);
 
   const handleRequestDownload = async () => {
     if (!requestId || state === "preparing" || state === "granted") return;

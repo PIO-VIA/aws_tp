@@ -235,18 +235,9 @@ export async function handleDownloadRequest(
     }),
   );
 
-  // f. Si le PDF existe dans S3 (ou rendu synchrone immédiat si pas encore généré)
+  // f. Si le PDF existe dans S3
   const pdfKey = `pdfs/${link.docId}/${versionId}.pdf`;
-  let pdfExists = await headObject(pdfKey);
-
-  if (!pdfExists) {
-    try {
-      await processPdfJob({ docId: link.docId, versionId });
-      pdfExists = await headObject(pdfKey);
-    } catch (err) {
-      log.warn("reservation.direct_render_fallback", { docId: link.docId, versionId, error: err });
-    }
-  }
+  const pdfExists = await headObject(pdfKey);
 
   const docSlug = slugify(link.docId);
   const filename = `${docSlug}-${versionId.substring(0, 8)}.pdf`;
