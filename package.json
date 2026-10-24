@@ -6,24 +6,24 @@
     "#standard-fonts/*": "./node_modules/pdfkit/js/standard-fonts/*.cjs"
   },
   "scripts": {
-    "dev": "concurrently -k -n next,collab,sqs,rec -c blue,magenta,yellow,cyan \"next dev\" \"tsx watch --env-file=.env.local collab/server.ts\" \"tsx --env-file=.env.local scripts/local-sqs-poller.ts\" \"tsx --env-file=.env.local scripts/local-reconciler.ts\"",
+    "dev": "concurrently -k -n next,collab,sqs,rec -c blue,magenta,yellow,cyan \"next dev\" \"tsx watch --env-file-if-exists=.env.local collab/server.ts\" \"tsx --env-file-if-exists=.env.local scripts/local-sqs-poller.ts\" \"tsx --env-file-if-exists=.env.local scripts/local-reconciler.ts\"",
     "dev:all": "npm run local:up && npm run local:init && npm run dev",
     "local:up": "docker compose up -d",
     "local:down": "docker compose down -v",
-    "local:init": "tsx --env-file=.env.local scripts/local-init.ts",
-    "seed": "tsx --env-file=.env.local scripts/seed.ts",
+    "local:init": "tsx --env-file-if-exists=.env.local scripts/local-init.ts",
+    "seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
     "build": "next build",
     "build:collab": "esbuild collab/server.ts --bundle --platform=node --target=node22 --outfile=dist/collab/server.js",
-    "build:lambdas": "tsx --env-file=.env.local scripts/build-lambdas.ts",
+    "build:lambdas": "tsx --env-file-if-exists=.env.local scripts/build-lambdas.ts",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:scenarios": "vitest run tests/scenarios",
-    "loadtest:download": "tsx --env-file=.env.local loadtest/download-burst.ts",
-    "loadtest:collab": "tsx --env-file=.env.local loadtest/collab-sim.ts",
-    "smoke": "tsx --env-file=.env.local scripts/smoke.ts"
+    "loadtest:download": "tsx --env-file-if-exists=.env.local loadtest/download-burst.ts",
+    "loadtest:collab": "tsx --env-file-if-exists=.env.local loadtest/collab-sim.ts",
+    "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1156.0",

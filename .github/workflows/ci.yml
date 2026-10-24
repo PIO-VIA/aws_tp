@@ -46,6 +46,9 @@ jobs:
       - name: Checkout du code
         uses: actions/checkout@v4
 
+      - name: Création d'un .env.local pour l'environnement CI
+        run: touch .env.local
+
       - name: Configuration de Node.js 22
         uses: actions/setup-node@v4
         with:
