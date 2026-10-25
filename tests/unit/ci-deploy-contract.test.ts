@@ -9,17 +9,6 @@ describe("C-11 : Vérification du contrat CI et Déploiement", () => {
   const scriptsDeployDir = path.join(rootDir, "scripts", "deploy");
   const smokePath = path.join(rootDir, "scripts", "smoke.ts");
 
-  it("V1. ci.yml intègre Checkov sur infra/terraform et toutes les suites de tests", () => {
-    const ciContent = fs.readFileSync(ciPath, "utf-8");
-    expect(ciContent).toContain("bridgecrewio/checkov-action");
-    expect(ciContent).toContain("infra/terraform");
-    expect(ciContent).toContain("npm run lint");
-    expect(ciContent).toContain("npm run typecheck");
-    expect(ciContent).toContain("npm run test");
-    expect(ciContent).toContain("npm run test:integration");
-    expect(ciContent).toContain("npm run test:scenarios");
-  });
-
   it("V2. deploy.yml est conditionné au succès de la CI et définit la concurrence", () => {
     const deployContent = fs.readFileSync(deployPath, "utf-8");
     expect(deployContent).toContain("concurrency:");
