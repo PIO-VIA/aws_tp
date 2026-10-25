@@ -230,16 +230,10 @@ resource "aws_dynamodb_table" "reservations" {
 resource "aws_dynamodb_table" "pdf_jobs" {
   name         = "${local.name_prefix}-pdf_jobs"
   billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "docId"
-  range_key    = "versionId"
+  hash_key     = "jobId"
 
   attribute {
-    name = "docId"
-    type = "S"
-  }
-
-  attribute {
-    name = "versionId"
+    name = "jobId"
     type = "S"
   }
 }
@@ -248,27 +242,10 @@ resource "aws_dynamodb_table" "pdf_jobs" {
 resource "aws_dynamodb_table" "notifications" {
   name         = "${local.name_prefix}-notifications"
   billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "notificationId"
+  hash_key     = "linkId"
 
   attribute {
-    name = "notificationId"
+    name = "linkId"
     type = "S"
-  }
-
-  attribute {
-    name = "status"
-    type = "S"
-  }
-
-  attribute {
-    name = "scheduledAt"
-    type = "S"
-  }
-
-  global_secondary_index {
-    name            = "by_status"
-    hash_key        = "status"
-    range_key       = "scheduledAt"
-    projection_type = "ALL"
   }
 }

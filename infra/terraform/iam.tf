@@ -115,7 +115,8 @@ resource "aws_iam_policy" "pdf_worker" {
         ]
         Resource = [
           aws_dynamodb_table.pdf_jobs.arn,
-          aws_dynamodb_table.reservations.arn
+          aws_dynamodb_table.reservations.arn,
+          aws_dynamodb_table.documents.arn
         ]
       },
       {
@@ -179,6 +180,7 @@ resource "aws_iam_policy" "pdf_dlq_handler" {
           "dynamodb:GetItem",
           "dynamodb:UpdateItem",
           "dynamodb:Query",
+          "dynamodb:Scan",
           "dynamodb:TransactWriteItems"
         ]
         Resource = [
