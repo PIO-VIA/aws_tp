@@ -78,7 +78,7 @@ resource "aws_dynamodb_table" "doc_updates" {
   name         = "${local.name_prefix}-doc_updates"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "docId"
-  range_key    = "clock"
+  range_key    = "seq"
 
   attribute {
     name = "docId"
@@ -86,7 +86,7 @@ resource "aws_dynamodb_table" "doc_updates" {
   }
 
   attribute {
-    name = "clock"
+    name = "seq"
     type = "N"
   }
 
