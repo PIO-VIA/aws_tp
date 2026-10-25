@@ -222,3 +222,53 @@ Le système arbitre explicitement entre simplicité opérationnelle, maîtrise s
 7. **Absence de pare-feu applicatif AWS WAF** :
    - *Limite* : Aucun Web Application Firewall n'est configuré devant CloudFront (frais fixes minimaux de 5 $/mois + 1 $/règle incompatibles avec le plafond budgétaire de 10 $).
    - *Atténuation* : La protection anti-abus est assurée au niveau applicatif (rate limiter 50 updates/s dans le serveur collab, détection d'abus, verrouillage mémoire 1s sur les liens épuisés, et validation Zod stricte sur chaque endpoint).
+
+---
+
+## 6. Identité Visuelle et Charte Graphique
+
+### 6.1 Concept et Métaphore
+Le logo de l'application **Éditeur Collaboratif** symbolise l'acte d'écriture partagée en temps réel destiné à la publication étudiante :
+- **La feuille de papier** aux coins arrondis et coin replié en haut à droite évoque le support tangible, le manuscrit et le tirage papier / PDF final.
+- **Les lignes de texte stylisées** représentent le contenu éditorial en cours d'élaboration.
+- **Les deux curseurs collaboratifs colorés** (Indigo et Ambre), positionnés à des hauteurs différentes, illustrent la présence simultanée de plusieurs rédacteurs écrivant ensemble sur le même document.
+- **Style géométrique plat (*flat design*)** : aucun artifice 3D, ni flou, ni filtre SVG lourd. L'identité repose sur des tracés vectoriels nets, épurés et directement lisibles à toutes les échelles (de 16 px à 512 px).
+
+### 6.2 Palette Chromatique et Tokens CSS
+Le symbole s'appuie sur la couleur d'accent principale de l'application (Indigo) combinée à une couleur secondaire chaleureuse (Ambre), intégrées sous forme de variables CSS dans les thèmes **Papier** (clair) et **Nuit** (sombre) :
+
+| Rôle | Token CSS | Thème Papier (clair) | Thème Nuit (sombre) |
+| :--- | :--- | :--- | :--- |
+| **Fond de feuille** | `--color-brand-sheet-fill` | `#EEF2FF` (Indigo 50) | `#1E1B4B` (Indigo 950) |
+| **Contour feuille** | `--color-brand-sheet-stroke` | `#4F46E5` (Indigo 600) | `#818CF8` (Indigo 400) |
+| **Coin replié** | `--color-brand-fold-fill` | `#C7D2FE` (Indigo 200) | `#312E81` (Indigo 900) |
+| **Lignes de texte** | `--color-brand-lines` | `#94A3B8` (Slate 400) | `#475569` (Slate 600) |
+| **Curseur Rédacteur 1** | `--color-brand-cur1` | `#4F46E5` (Indigo 600) | `#818CF8` (Indigo 400) |
+| **Curseur Rédacteur 2** | `--color-brand-cur2` | `#F59E0B` (Amber 500) | `#FBBF24` (Amber 400) |
+| **Monochrome** | *Mode mono* | `currentColor` | `currentColor` |
+
+### 6.3 Mot-Symbole (Typographie)
+Conformément aux règles de conception, le nom de l'application n'est **jamais encodé dans le fichier SVG**, afin de garantir une accessibilité optimale et une netteté vectorielle native :
+- Rendu en **texte HTML** utilisant la police de l'interface (**Geist Sans**).
+- Hiérarchie typographique : « **Éditeur** » en graisse grasse (`font-bold text-slate-900 dark:text-white`), suivi de « **Collaboratif** » en graisse normale (`font-normal text-slate-600 dark:text-slate-300`).
+- Sur les écrans mobiles étroits (< 640 px), l'option `hideTextOnMobile` permet de masquer le texte pour ne conserver que le symbole vectoriel dans la barre d'en-tête.
+
+### 6.4 Zone de Protection et Tailles Minimales
+- **Zone de protection (marge de sécurité)** :
+  Une zone d'exclusion minimale égale à **25 % de la largeur du symbole** (`0.25 × size`) doit être respectée tout autour du logo. Aucun texte, bouton ou séparateur ne doit empiéter sur cet espace.
+- **Taille minimale à l'écran** :
+  - **16 × 16 px** : taille minimale d'affichage (favicon navigateur, barre de statut). À cette dimension, le composant `Logo` active automatiquement une version simplifiée à 2 lignes renforcées pour garantir une lisibilité sans bavure.
+  - **24 × 24 px** : taille recommandée pour les barres d'outils et menus contextuels.
+  - **32 × 32 px** : taille standard des en-têtes d'application.
+  - **64 × 64 px / 128 × 128 px** : variantes empilées pour écrans de connexion et modales.
+- **Taille minimale en impression / PDF** : 5 mm de côté.
+
+### 6.5 Usages Interdits
+Pour préserver l'intégrité de l'identité de marque, les pratiques suivantes sont formellement proscrites :
+1. **Déformation** : Ne jamais étirer, compresser ou incliner le logo (respecter impérativement le ratio 1:1).
+2. **Recoloration arbitraire** : Ne pas substituer les teintes Indigo et Ambre par des couleurs fantaisistes hors de la palette de marque (utiliser `mono={true}` / `currentColor` si une intégration uniforme est nécessaire).
+3. **Ajout d'effets visuels** : Ne pas ajouter d'ombres portées agressives, biseaux 3D, flous gaussiens ou dégradés complexes non validés.
+4. **Contraste insuffisant** : Ne jamais placer le logo couleur sur un fond de teinte proche (respecter systématiquement le ratio de contraste minimal de 4.5:1 WCAG AA).
+5. **Texte dans le SVG** : Ne pas intégrer le nom du produit en balises `<text>` dans le SVG de marque.
+6. **Emojis et glyphes bruts** : Ne jamais substituer le logo ou les icônes d'action par des emojis système ou des caractères Unicode non vectoriels.
+

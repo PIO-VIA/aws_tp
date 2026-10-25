@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+import { Logo } from "@/src/components/brand/Logo";
+import { ThemeToggle } from "@/src/components/ui/ThemeToggle";
 
 interface OpenDoc {
   docId: string;
@@ -140,19 +143,23 @@ export default function AdminPage() {
 
   if (!token) {
     return (
-      <main className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-neutral-900/90 border border-neutral-800 p-8 rounded-2xl shadow-2xl backdrop-blur-md">
-          <div className="flex items-center gap-3 mb-6">
-            <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
-            <h1 className="text-xl font-bold tracking-tight">Supervision Association</h1>
+      <main className="min-h-screen bg-slate-100/70 dark:bg-neutral-950 text-slate-900 dark:text-neutral-100 flex items-center justify-center p-4 relative transition-colors duration-150">
+        <div className="absolute top-4 right-4">
+          <ThemeToggle />
+        </div>
+        <div className="w-full max-w-md bg-white dark:bg-neutral-900/90 border border-slate-200 dark:border-neutral-800 p-8 rounded-3xl shadow-xl backdrop-blur-md">
+          <Logo variant="stacked" size={52} className="mb-6" />
+          <div className="flex items-center gap-3 mb-4">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Supervision Association</h1>
           </div>
-          <p className="text-sm text-neutral-400 mb-6">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-neutral-400 mb-6">
             Veuillez saisir votre jeton administrateur pour accéder au tableau de bord en temps réel.
           </p>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-neutral-400 mb-2">
                 Jeton Administrateur (ADMIN_TOKEN)
               </label>
               <input
@@ -160,23 +167,24 @@ export default function AdminPage() {
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
                 placeholder="Entrez le jeton admin..."
-                className="w-full px-4 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-indigo-500"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800 border border-slate-300 dark:border-neutral-700 text-slate-900 dark:text-neutral-100 placeholder-slate-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 autoFocus
               />
             </div>
-            {error && <p className="text-xs text-red-400 font-medium">{error}</p>}
+            {error && <p className="text-xs text-rose-500 font-medium">{error}</p>}
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 font-medium text-white transition-colors cursor-pointer shadow-lg shadow-indigo-600/30 disabled:opacity-50"
+              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition-colors cursor-pointer shadow-lg shadow-indigo-600/30 disabled:opacity-50"
             >
               {loading ? "Vérification..." : "Accéder à la supervision"}
             </button>
           </form>
 
           <div className="mt-6 text-center">
-            <Link href="/" className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors">
-              ← Retour à l&apos;accueil rédacteur
+            <Link href="/" className="text-xs text-slate-500 hover:text-slate-700 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors inline-flex items-center gap-1.5">
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Retour à l&apos;accueil rédacteur</span>
             </Link>
           </div>
         </div>
@@ -185,35 +193,39 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6 md:p-10 font-sans">
+    <main className="min-h-screen bg-slate-100/70 dark:bg-neutral-950 text-slate-900 dark:text-neutral-100 p-4 sm:p-6 md:p-10 font-sans transition-colors duration-150">
       <div className="max-w-6xl mx-auto space-y-8">
         {/* En-tête */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-neutral-800 gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></span>
-              <h1 className="text-2xl font-bold tracking-tight">Supervision & Administration</h1>
+        <header className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-slate-200 dark:border-neutral-800 gap-4">
+          <div className="flex items-center gap-4">
+            <Logo variant="mark" size="lg" className="p-2 rounded-2xl bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 shadow-xs" />
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Supervision &amp; Administration</h1>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-neutral-400 mt-1">
+                Tableau rafraîchi toutes les 5 s • Dernière mise à jour : {lastRefreshedAt || "en cours..."}
+              </p>
             </div>
-            <p className="text-xs text-neutral-400 mt-1">
-              Tableau rafraîchi toutes les 5 s • Dernière mise à jour : {lastRefreshedAt || "en cours..."}
-            </p>
           </div>
           <div className="flex items-center gap-3">
+            <ThemeToggle size="sm" />
             <button
               onClick={() => fetchOverview(token)}
-              className="px-3.5 py-1.5 text-xs font-medium rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition cursor-pointer"
+              className="px-3.5 py-1.5 text-xs font-medium rounded-xl bg-white dark:bg-neutral-800 hover:bg-slate-100 dark:hover:bg-neutral-700 text-slate-700 dark:text-neutral-200 border border-slate-200 dark:border-neutral-700 transition cursor-pointer"
             >
-              Rafraîchir maintenant
+              Rafraîchir
             </button>
             <Link
               href="/"
-              className="px-3.5 py-1.5 text-xs font-medium rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 transition"
+              className="px-3.5 py-1.5 text-xs font-medium rounded-xl bg-white dark:bg-neutral-800 hover:bg-slate-100 dark:hover:bg-neutral-700 text-slate-700 dark:text-neutral-200 border border-slate-200 dark:border-neutral-700 transition"
             >
               Espace rédacteur
             </Link>
             <button
               onClick={handleLogout}
-              className="px-3.5 py-1.5 text-xs font-medium rounded-lg bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 transition cursor-pointer"
+              className="px-3.5 py-1.5 text-xs font-medium rounded-xl bg-rose-50 dark:bg-red-950/60 hover:bg-rose-100 dark:hover:bg-red-900/80 text-rose-700 dark:text-red-300 border border-rose-200 dark:border-red-800/60 transition cursor-pointer"
             >
               Déconnexion
             </button>
@@ -268,9 +280,10 @@ export default function AdminPage() {
                       <td className="py-3.5 text-right">
                         <Link
                           href={`/editor/${doc.docId}`}
-                          className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                          className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors inline-flex items-center gap-1"
                         >
-                          Ouvrir l&apos;éditeur →
+                          <span>Ouvrir l&apos;éditeur</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
                         </Link>
                       </td>
                     </tr>

@@ -1,6 +1,9 @@
 "use client";
 
 import { use, useEffect, useState, useRef, useCallback } from "react";
+import { Check, X, Info, CircleCheck, Download } from "lucide-react";
+import { Logo } from "@/src/components/brand/Logo";
+import { ThemeToggle } from "@/src/components/ui/ThemeToggle";
 
 type DlState =
   | "checking"
@@ -229,36 +232,41 @@ export default function DownloadPage({
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col justify-center items-center p-4">
-      <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl p-8 shadow-2xl space-y-6">
-        <header className="space-y-2 text-center">
-          <span className="inline-block px-3 py-1 text-xs font-semibold tracking-wider uppercase bg-blue-950 text-blue-400 rounded-full border border-blue-800">
+    <div className="min-h-screen bg-slate-100/70 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 flex flex-col justify-center items-center p-4 relative transition-colors duration-150">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
+
+      <div className="w-full max-w-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+        <header className="space-y-3 text-center">
+          <Logo variant="stacked" size={48} className="mb-1" />
+          <span className="inline-block px-3 py-1 text-xs font-semibold tracking-wider uppercase bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400 rounded-full border border-indigo-200 dark:border-indigo-800">
             Journal de l&apos;Association
           </span>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
             Téléchargement du Document
           </h1>
-          <p className="text-sm text-zinc-400">
+          <p className="text-xs sm:text-sm text-slate-600 dark:text-zinc-400">
             Lien sécurisé à tirage limité. Chaque réservation accorde une copie unique.
           </p>
         </header>
 
-        <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-5 space-y-3">
+        <div className="bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 space-y-3">
           <div className="flex items-center space-x-3">
             {state === "checking" || state === "preparing" || state === "retrying" ? (
-              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
             ) : state === "granted" ? (
-              <span className="text-emerald-400 font-bold">✓</span>
+              <Check className="w-4 h-4 text-emerald-500 shrink-0 font-bold" />
             ) : state === "exhausted" ? (
-              <span className="text-amber-500 font-bold">✕</span>
+              <X className="w-4 h-4 text-amber-500 shrink-0 font-bold" />
             ) : (
-              <span className="text-zinc-500 font-bold">ℹ</span>
+              <Info className="w-4 h-4 text-slate-400 shrink-0" />
             )}
-            <p className="text-sm font-medium text-zinc-200">{message}</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-zinc-200">{message}</p>
           </div>
 
           {(state === "preparing" || state === "retrying") && (
-            <div className="text-xs text-zinc-500 flex justify-between pt-2 border-t border-zinc-800/60">
+            <div className="text-xs text-slate-500 dark:text-zinc-500 flex justify-between pt-2 border-t border-slate-200 dark:border-zinc-800/60">
               <span>Temps d&apos;attente : {elapsedSec} s</span>
               <span>Plafond : 60 s</span>
             </div>
@@ -270,11 +278,9 @@ export default function DownloadPage({
             <button
               id="dl-request-btn"
               onClick={handleRequestDownload}
-              className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-xl transition duration-150 flex items-center justify-center space-x-2 shadow-lg shadow-blue-900/40 cursor-pointer"
+              className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold rounded-xl transition duration-150 flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/30 cursor-pointer text-sm"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
+              <Download className="w-4 h-4" />
               <span>Télécharger mon exemplaire PDF</span>
             </button>
           )}
@@ -282,39 +288,38 @@ export default function DownloadPage({
           {state === "preparing" && (
             <button
               disabled
-              className="w-full py-3.5 px-4 bg-zinc-800 text-zinc-300 font-medium rounded-xl cursor-not-allowed flex items-center justify-center space-x-2"
+              className="w-full py-3.5 px-4 bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-300 font-medium rounded-xl cursor-not-allowed flex items-center justify-center space-x-2 text-sm"
             >
-              <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-              <span>Réservation et préparation du PDF...</span>
+              <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+              <span>Réservation et préparation du PDF…</span>
             </button>
           )}
 
           {state === "granted" && downloadUrl && (
             <div className="space-y-3">
-              <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-center space-y-1">
-                <p className="text-emerald-400 font-semibold text-sm flex items-center justify-center gap-1.5">
-                  <span>✓</span> Téléchargement lancé automatiquement
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl text-center space-y-1">
+                <p className="text-emerald-700 dark:text-emerald-400 font-semibold text-sm flex items-center justify-center gap-1.5">
+                  <CircleCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Téléchargement lancé automatiquement</span>
                 </p>
-                <p className="text-zinc-400 text-xs">
-                  Fichier : <span className="font-mono text-zinc-300">{filename}</span>
+                <p className="text-slate-500 dark:text-zinc-400 text-xs">
+                  Fichier : <span className="font-mono text-slate-700 dark:text-zinc-300">{filename}</span>
                 </p>
               </div>
               <a
                 id="dl-direct-link"
                 href={downloadUrl}
                 download={filename ?? "document.pdf"}
-                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition flex items-center justify-center space-x-2 shadow-lg shadow-emerald-900/30 text-sm"
+                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl transition flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/20 text-sm"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
+                <Download className="w-4 h-4" />
                 <span>Télécharger à nouveau ({filename})</span>
               </a>
             </div>
           )}
 
           {state === "exhausted" && (
-            <div className="text-center p-4 bg-amber-950/20 border border-amber-800/40 rounded-xl text-amber-300 text-sm">
+            <div className="text-center p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 rounded-2xl text-amber-800 dark:text-amber-300 text-sm">
               Tous les exemplaires autorisés pour ce document ont été distribués.
             </div>
           )}
@@ -322,15 +327,15 @@ export default function DownloadPage({
           {state === "failed" && (
             <button
               onClick={handleRequestDownload}
-              className="w-full py-3 px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium rounded-xl transition cursor-pointer"
+              className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 font-medium rounded-xl transition cursor-pointer text-sm"
             >
               <span>Réessayer la demande</span>
             </button>
           )}
         </div>
 
-        <footer className="text-center text-xs text-zinc-600">
-          Identifiant visiteur anonyme : <code className="font-mono text-zinc-500">{requestId.substring(0, 8)}...</code>
+        <footer className="text-center text-xs text-slate-400 dark:text-zinc-600">
+          Identifiant visiteur anonyme : <code className="font-mono">{requestId.substring(0, 8)}…</code>
         </footer>
       </div>
     </div>

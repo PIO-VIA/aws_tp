@@ -1,26 +1,78 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Thème Papier (clair) */
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  --color-surface: #ffffff;
+  --color-surface-raised: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-accent: #4f46e5;
+  --color-accent-contrast: #ffffff;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+
+  /* Brand Tokens (Logo et identité visuelle) */
+  --color-brand-sheet-fill: #eef2ff;
+  --color-brand-sheet-stroke: #4f46e5;
+  --color-brand-fold-fill: #c7d2fe;
+  --color-brand-lines: #94a3b8;
+  --color-brand-cur1: #4f46e5;
+  --color-brand-cur2: #f59e0b;
+}
+
+[data-theme="dark"],
+.dark {
+  /* Thème Nuit (sombre) */
+  --background: #020617;
+  --foreground: #f8fafc;
+
+  --color-surface: #0f172a;
+  --color-surface-raised: #1e293b;
+  --color-border: #334155;
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-accent: #6366f1;
+  --color-accent-contrast: #ffffff;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+
+  /* Brand Tokens Nuit */
+  --color-brand-sheet-fill: #1e1b4b;
+  --color-brand-sheet-stroke: #818cf8;
+  --color-brand-fold-fill: #312e81;
+  --color-brand-lines: #475569;
+  --color-brand-cur1: #818cf8;
+  --color-brand-cur2: #fbbf24;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-accent: var(--color-accent);
+  --color-accent-contrast: var(--color-accent-contrast);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-danger: var(--color-danger);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }

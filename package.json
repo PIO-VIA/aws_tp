@@ -29,7 +29,9 @@
     "loadtest:download": "tsx --env-file-if-exists=.env.local loadtest/download-burst.ts",
     "loadtest:collab": "tsx --env-file-if-exists=.env.local loadtest/collab-sim.ts",
     "loadtest:combined": "tsx --env-file-if-exists=.env.local loadtest/combined.ts",
-    "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke.ts"
+    "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke.ts",
+    "brand:build": "tsx scripts/generate-brand-assets.ts",
+    "check:ui": "tsx scripts/check-no-emoji.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1156.0",
@@ -69,6 +71,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
     "pdfjs-dist": "6.4.299",
+    "sharp": "^0.35.5",
     "tailwindcss": "^4",
     "tsx": "4.23.15",
     "typescript": "^5",

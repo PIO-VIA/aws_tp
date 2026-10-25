@@ -363,4 +363,12 @@ Error: Cannot find module '../../scripts/gen-test-report'
 | `esbuild` (0.28.2) | Bundler | Compilation rapide du serveur collab et des zips Lambda |
 | `concurrently` (10.0.6) | Orchestrateur de tâches dev | Exécution conjointe de Next, collab, poller et reconciler dans `npm run dev` |
 | `pdfjs-dist` (6.4.299) | Analyse de PDF | Vérification du contenu textuel des PDF dans les tests SC03 |
+| `sharp` (^0.35.5) | Générateur d'actifs graphiques matriciels | Utilisé en devDependency par `scripts/generate-brand-assets.ts` (`brand:build`) pour convertir les SVG de marque en PNG et ICO multi-tailles. Zéro impact sur le runtime de production. |
+
+### 9.4 Décision d'identité visuelle : Recommandation de la Piste A
+
+| ID | Décision | Justification (3 lignes) | Alternative écartée | Impact invariants |
+| -- | -------- | ------------------------ | -------------------- | ----------------- |
+| D-45 | **Choix de la Piste A (« Curseurs croisés ») comme identité visuelle par défaut** | La piste A allie un symbolisme fort (feuille repliée avec deux curseurs en Indigo et Ambre) à une parfaite lisibilité en 16x16 px grâce à ses lignes épurées et géométriques.<br>Elle incarne immédiatement l'action d'écrire à plusieurs en temps réel sans surcharge visuelle ni artifice 3D, tout en assurant un contraste optimal en thèmes Papier et Nuit.<br>Le mot-symbole en texte HTML (Geist Sans) garantit une netteté absolue sur tous les écrans, un respect natif de l'accessibilité et une réactivité fluide. | Piste B (têtes de carets anguleuses, plus encombrées à 16px) et Piste C (trop abstraite, perd la métaphore du curseur texte). | Aucun impact sur la logique métier ; renforce l'identité de marque et l'ergonomie. |
+
 
