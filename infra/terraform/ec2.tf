@@ -23,10 +23,10 @@ data "aws_ec2_managed_prefix_list" "cloudfront" {
   name = "com.amazonaws.global.cloudfront.origin-facing"
 }
 
-# Groupe de sécurité EC2 : Port 80 uniquement depuis CloudFront, aucun SSH (SSM Session Manager)
+# Groupe de sécurité EC2 : Port 80 depuis CloudFront, port 22 pour SSH / déploiements
 resource "aws_security_group" "ec2" {
   name        = "${local.name_prefix}-ec2-sg"
-  description = "Autorise uniquement le trafic entrant depuis CloudFront sur le port 80"
+  description = "Autorise le trafic entrant depuis CloudFront sur le port 80 et SSH sur le port 22"
 
   ingress {
     description     = "HTTP entrant depuis CloudFront uniquement"
@@ -34,6 +34,14 @@ resource "aws_security_group" "ec2" {
     to_port         = 80
     protocol        = "tcp"
     prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront.id]
+  }
+
+  ingress {
+    description = "SSH entrant pour administration et deploiement"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {

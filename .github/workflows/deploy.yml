@@ -61,7 +61,9 @@ jobs:
             "${{ vars.ECR_APP_URL }}" \
             "${{ vars.ECR_COLLAB_URL }}"
 
-      - name: Déploiement sur EC2 via SSM Run Command
+      - name: Déploiement sur EC2 via SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
           GIT_SHA=$(git rev-parse --short HEAD)
           ./scripts/deploy/deploy-ec2.sh "${GIT_SHA}" "${{ vars.EC2_INSTANCE_ID }}" "${{ env.AWS_REGION }}"

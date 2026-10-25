@@ -20,6 +20,14 @@ fi
 AWS_REGION="${AWS_REGION:-eu-north-1}"
 ECR_APP_URL="${ECR_APP_URL:-}"
 
+# Auto-détection de ECR_APP_URL si absent de .env
+if [ -z "${ECR_APP_URL}" ]; then
+    ACCOUNT_ID=$(aws sts get-caller-identity --region "${AWS_REGION}" --query Account --output text 2>/dev/null || true)
+    if [ -n "${ACCOUNT_ID}" ] && [ "${ACCOUNT_ID}" != "None" ]; then
+        ECR_APP_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/editeur-collab-dev-app"
+    fi
+fi
+
 # 2. Authentification ECR
 if [ -n "${ECR_APP_URL}" ]; then
     REGISTRY=$(echo "${ECR_APP_URL}" | cut -d/ -f1)
