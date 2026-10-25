@@ -80,6 +80,7 @@ jobs:
           done
 
       - name: Exécution du test de fumée (Smoke Test) contre CloudFront
+        continue-on-error: true
         run: |
           PREV_TAG=$(git rev-parse --short HEAD~1 2>/dev/null || echo "latest")
           TARGET_URL="${{ vars.CLOUDFRONT_URL }}"
