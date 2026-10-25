@@ -41,6 +41,7 @@ services:
       - NODE_ENV=production
       - COLLAB_PORT=1234
       - COLLAB_INTERNAL_PORT=1235
+      - COLLAB_INTERNAL_HOST=0.0.0.0
     expose:
       - "1234"
       - "1235"

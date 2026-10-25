@@ -55,7 +55,7 @@ export const configSchema = z
     COLLAB_PORT: intFrom(1234, 1),
     COLLAB_INTERNAL_PORT: intFrom(1235, 1),
     COLLAB_INTERNAL_HOST: z.string().default("127.0.0.1"),
-    COLLAB_INTERNAL_URL: z.string().default("http://localhost:1235"),
+    COLLAB_INTERNAL_URL: z.string().optional(),
 
     DAILY_CREDIT: intFrom(10000, 1),
     MAX_DOWNLOADS_CAP: intFrom(1000, 1),
@@ -79,6 +79,9 @@ export const configSchema = z
   })
   .transform((c) => ({
     ...c,
+    COLLAB_INTERNAL_URL:
+      c.COLLAB_INTERNAL_URL ||
+      `http://${c.COLLAB_INTERNAL_HOST}:${c.COLLAB_INTERNAL_PORT}`,
     S3_FORCE_PATH_STYLE:
       c.S3_FORCE_PATH_STYLE !== undefined ? c.S3_FORCE_PATH_STYLE : c.APP_ENV === "local",
   }))

@@ -33,6 +33,41 @@ function getDeterministicColor(str: string): string {
   return COLORS[Math.abs(hash) % COLORS.length];
 }
 
+/**
+ * Résout dynamiquement l'URL WebSocket du serveur de collaboration.
+ * - En local (localhost / 127.0.0.1) : se connecte directement à ws://localhost:1234
+ * - En production (ex: CloudFront, nom de domaine, IP externe) : se connecte via le reverse-proxy
+ *   Caddy/CloudFront sur /collab (wss://<host>/collab en HTTPS ou ws://<host>/collab en HTTP).
+ * - Si NEXT_PUBLIC_COLLAB_URL est explicitement fournie et ne pointe pas sur localhost en prod,
+ *   elle est respectée (permet une configuration personnalisée).
+ */
+export function resolveCollabWsUrl(): string {
+  if (typeof window !== "undefined") {
+    const isLocalhost =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+
+    const envUrl = process.env.NEXT_PUBLIC_COLLAB_URL;
+
+    // Si une URL personnalisée non-localhost est explicitement configurée
+    if (envUrl && !envUrl.includes("localhost") && !envUrl.includes("127.0.0.1")) {
+      if (envUrl.startsWith("/")) {
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${proto}//${window.location.host}${envUrl}`;
+      }
+      return envUrl;
+    }
+
+    // En environnement déployé (ex: CloudFront https://d3eg6zl3hu2tvv.cloudfront.net)
+    if (!isLocalhost) {
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      return `${proto}//${window.location.host}/collab`;
+    }
+  }
+
+  return process.env.NEXT_PUBLIC_COLLAB_URL || "ws://localhost:1234";
+}
+
 export default function EditorPage({
   params,
 }: {
@@ -182,7 +217,7 @@ export default function EditorPage({
         ydoc = new Y.Doc();
         const ytext = ydoc.getText("content");
 
-        const collabWsUrl = process.env.NEXT_PUBLIC_COLLAB_URL || "ws://localhost:1234";
+        const collabWsUrl = resolveCollabWsUrl();
         provider = new HocuspocusProvider({
           url: collabWsUrl,
           name: docId,

@@ -52,6 +52,7 @@ ECR_APP_URL=$${ECR_APP_URL}
 ECR_COLLAB_URL=$${ECR_COLLAB_URL}
 LOG_GROUP_APP=$${LOG_GROUP_APP}
 LOG_GROUP_COLLAB=$${LOG_GROUP_COLLAB}
+COLLAB_INTERNAL_URL=http://collab:1235
 EOF
 
 # Injection sécurisée de tous les paramètres sous SSM_PREFIX dans .env

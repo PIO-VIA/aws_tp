@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     let openDocsRaw: Array<{ docId: string; connections: number; lastActivityAt: number }> = [];
     try {
       const collabRes = await fetch(
-        `http://${config.COLLAB_INTERNAL_HOST}:${config.COLLAB_INTERNAL_PORT}/internal/open-documents`,
+        `${config.COLLAB_INTERNAL_URL}/internal/open-documents`,
         {
           headers: { "x-internal-token": config.INTERNAL_TOKEN },
         },

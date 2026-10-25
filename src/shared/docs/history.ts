@@ -136,7 +136,7 @@ export async function requestRestore(
   }
 
   const config = getConfig();
-  const collabUrl = `http://${config.COLLAB_INTERNAL_HOST}:${config.COLLAB_INTERNAL_PORT}/internal/documents/${docId}/restore`;
+  const collabUrl = `${config.COLLAB_INTERNAL_URL}/internal/documents/${docId}/restore`;
 
   const res = await fetch(collabUrl, {
     method: "POST",
@@ -169,7 +169,7 @@ export async function requestSnapshot(
   writerId?: string,
 ): Promise<{ snapshotId: string; versionId: string }> {
   const config = getConfig();
-  const collabUrl = `http://${config.COLLAB_INTERNAL_HOST}:${config.COLLAB_INTERNAL_PORT}/internal/documents/${docId}/snapshot`;
+  const collabUrl = `${config.COLLAB_INTERNAL_URL}/internal/documents/${docId}/snapshot`;
 
   const res = await fetch(collabUrl, {
     method: "POST",

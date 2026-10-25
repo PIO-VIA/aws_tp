@@ -10,6 +10,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV COLLAB_PORT=1234
 ENV COLLAB_INTERNAL_PORT=1235
+ENV COLLAB_INTERNAL_HOST=0.0.0.0
 
 # Utilisateur non-root
 RUN groupadd --system --gid 1001 collabgroup && \

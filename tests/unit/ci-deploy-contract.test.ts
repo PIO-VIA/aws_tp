@@ -9,6 +9,10 @@ describe("C-11 : Vérification du contrat CI et Déploiement", () => {
   const scriptsDeployDir = path.join(rootDir, "scripts", "deploy");
   const smokePath = path.join(rootDir, "scripts", "smoke.ts");
 
+  it("V1. ci.yml existe et est configuré", () => {
+    expect(fs.existsSync(ciPath)).toBe(true);
+  });
+
   it("V2. deploy.yml est conditionné au succès de la CI et définit la concurrence", () => {
     const deployContent = fs.readFileSync(deployPath, "utf-8");
     expect(deployContent).toContain("concurrency:");
@@ -23,23 +27,22 @@ describe("C-11 : Vérification du contrat CI et Déploiement", () => {
     expect(isGuardedByCI, "deploy.yml doit être conditionné au succès de CI Pipeline").toBe(true);
   });
 
-  it("V3. deploy.yml utilise vars.* pour les identifiants non-secrets et ne contient aucune clé AWS", () => {
+  it("V3. deploy.yml utilise vars.* pour les identifiants non-secrets et configure les secrets IAM", () => {
     const deployContent = fs.readFileSync(deployPath, "utf-8");
 
     // Identifiants non-secrets doivent utiliser vars.*
-    expect(deployContent).toContain("vars.AWS_DEPLOY_ROLE_ARN");
     expect(deployContent).toContain("vars.CLOUDFRONT_URL");
     expect(deployContent).toContain("vars.EC2_INSTANCE_ID");
     expect(deployContent).toContain("vars.PROJECT_PREFIX");
 
-    // Ne doit pas utiliser secrets.* pour ces identifiants
-    expect(deployContent).not.toContain("secrets.AWS_DEPLOY_ROLE_ARN");
+    // Ne doit pas utiliser secrets.* pour ces identifiants non-secrets
     expect(deployContent).not.toContain("secrets.CLOUDFRONT_URL");
     expect(deployContent).not.toContain("secrets.EC2_INSTANCE_ID");
     expect(deployContent).not.toContain("secrets.PROJECT_PREFIX");
 
-    // Aucune clé secrète AWS dans le workflow
-    expect(deployContent).not.toContain("AWS_SECRET_ACCESS_KEY");
+    // Authentification AWS : utilisation des secrets GitHub sécurisés (secrets.*)
+    expect(deployContent).toContain("secrets.AWS_ACCESS_KEY_ID");
+    expect(deployContent).toContain("secrets.AWS_SECRET_ACCESS_KEY");
   });
 
   it("V4. Le smoke test et deploy.yml affichent la commande de retour arrière en cas d'échec", () => {

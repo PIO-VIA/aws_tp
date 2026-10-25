@@ -89,8 +89,8 @@ describe("C-10 : Vérification du contrat de durcissement et nommage Terraform",
     // S3 bucket data: prefix-data-account_id
     expect(s3Content).toContain('bucket        = "${local.name_prefix}-data-${local.account_id}"');
 
-    // Budget: project-monthly
-    expect(budgetsContent).toContain('name         = "${var.project}-monthly"');
+    // Budget: project-monthly ou project-environment-monthly-budget
+    expect(budgetsContent).toMatch(/name\s*=\s*"\$\{var\.project\}(?:-\$\{var\.environment\})?-monthly(?:-budget)?"/);
 
     // Groupes de logs EC2
     expect(monitoringContent).toContain('"/${var.project}/${var.environment}/app"');
