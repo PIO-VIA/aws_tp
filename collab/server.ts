@@ -10,7 +10,7 @@
 import http from "http";
 import { Server, Connection } from "@hocuspocus/server";
 import * as Y from "yjs";
-import { PutCommand, QueryCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, QueryCommand, BatchWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { randomBytes } from "crypto";
 import { getConfig, tableName } from "../src/shared/config";
 import { getDocClient } from "../src/shared/aws/dynamodb";
@@ -136,21 +136,28 @@ export async function persistDocumentSnapshot(
     }),
   );
 
-  // 4. Mise à jour de doc_heads
-  await docClient.send(
-    new PutCommand({
-      TableName: tableName("doc_heads"),
-      Item: {
-        docId,
-        versionId,
-        textHash: versionId,
-        textKey,
-        upToSeq,
-        chars: text.length,
-        updatedAt: now,
-      },
-    }),
-  );
+  // 4. Mise à jour conditionnelle de doc_heads (ne jamais écraser un head avec un seq supérieur)
+  try {
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName("doc_heads"),
+        Key: { docId },
+        UpdateExpression:
+          "SET versionId = :v, textHash = :v, textKey = :tk, upToSeq = :seq, #chars = :ch, updatedAt = :up",
+        ConditionExpression: "attribute_not_exists(upToSeq) OR upToSeq <= :seq",
+        ExpressionAttributeNames: { "#chars": "chars" },
+        ExpressionAttributeValues: {
+          ":v": versionId,
+          ":tk": textKey,
+          ":seq": upToSeq,
+          ":ch": text.length,
+          ":up": now,
+        },
+      }),
+    );
+  } catch {
+    // Conflit concurrent acceptable si un snapshot plus récent a déjà écrit son head
+  }
 
   state.updatesSinceSnapshot = 0;
   state.lastSnapshotAt = Date.now();
@@ -594,8 +601,10 @@ export function createCollabServer(options?: CollabServerOptions): { server: Ser
     },
 
     async onStoreDocument(data) {
-      // Déclenché après debounce
-      await persistDocumentSnapshot(data.documentName, data.document, "idle");
+      // Déclenché après debounce si le snapshot à la fermeture/déconnexion est activé
+      if (options?.snapshotOnUnload !== false) {
+        await persistDocumentSnapshot(data.documentName, data.document, "idle");
+      }
     },
 
     async beforeUnloadDocument(data) {

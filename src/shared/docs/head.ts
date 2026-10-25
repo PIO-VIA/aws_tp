@@ -73,8 +73,8 @@ export async function getHead(docId: string): Promise<DocHead> {
   const existingHead = headRes.Item as (DocHead & { textHash?: string }) | undefined;
   const latestSeq = updatesRes.Items?.[0]?.seq as number | undefined;
 
-  // 2. Si le head enregistré correspond au dernier seq du journal
-  if (existingHead && latestSeq !== undefined && existingHead.upToSeq === latestSeq) {
+  // 2. Si le head enregistré correspond au dernier seq du journal (ou lui est supérieur)
+  if (existingHead && latestSeq !== undefined && existingHead.upToSeq >= latestSeq) {
     // Si le texte n'était pas stocké en mémoire, on le charge depuis S3
     let text = existingHead.text;
     if (!text && existingHead.textKey) {
@@ -156,42 +156,38 @@ export async function getHead(docId: string): Promise<DocHead> {
   }
 
   // Rejouer le journal d'updates > max(0, baseSeq - REPLAY_MARGIN)
-  let startSeq = Math.max(0, baseSeq - config.REPLAY_MARGIN);
-  let hasMore = true;
+  const replayStartSeq = Math.max(0, baseSeq - config.REPLAY_MARGIN);
+  let lastEvaluatedKey: Record<string, unknown> | undefined;
   let maxSeqEncountered = baseSeq;
 
-  while (hasMore) {
+  do {
     const journalRes = await docClient.send(
       new QueryCommand({
         TableName: updatesTable,
         KeyConditionExpression: "docId = :docId AND seq > :seq",
         ExpressionAttributeValues: {
           ":docId": docId,
-          ":seq": startSeq,
+          ":seq": replayStartSeq,
         },
         ScanIndexForward: true,
-        Limit: 100,
+        ExclusiveStartKey: lastEvaluatedKey,
         ConsistentRead: true,
       }),
     );
 
-    const items = journalRes.Items ?? [];
-    for (const item of items) {
-      const u = item.update as Uint8Array | Buffer;
-      if (u) {
-        Y.applyUpdate(ydoc, new Uint8Array(u));
-      }
-      if (typeof item.seq === "number" && item.seq > maxSeqEncountered) {
-        maxSeqEncountered = item.seq;
+    if (journalRes.Items) {
+      for (const item of journalRes.Items) {
+        const u = item.update as Uint8Array | Buffer;
+        if (u) {
+          Y.applyUpdate(ydoc, new Uint8Array(u));
+        }
+        if (typeof item.seq === "number" && item.seq > maxSeqEncountered) {
+          maxSeqEncountered = item.seq;
+        }
       }
     }
-
-    if (items.length < 100) {
-      hasMore = false;
-    } else {
-      startSeq = maxSeqEncountered;
-    }
-  }
+    lastEvaluatedKey = journalRes.LastEvaluatedKey;
+  } while (lastEvaluatedKey);
 
   // Extraire le texte du Y.Text "content"
   const text = ydoc.getText("content").toString();
