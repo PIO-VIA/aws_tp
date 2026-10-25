@@ -3,7 +3,8 @@
 # ------------------------------------------------------------------------------
 
 resource "aws_budgets_budget" "monthly" {
-  name         = "${var.project}-monthly"
+  account_id   = "106471789355"
+  name         = "${var.project}-${var.environment}-monthly-budget"
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)
   limit_unit   = "USD"
