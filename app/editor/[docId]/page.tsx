@@ -31,9 +31,11 @@ import {
   BookOpen,
   ZoomIn,
   ZoomOut,
+  Users,
 } from "lucide-react";
 import { Logo } from "@/src/components/brand/Logo";
 import { ThemeToggle } from "@/src/components/ui/ThemeToggle";
+import { EditorsModal } from "@/src/components/documents/EditorsModal";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { EditorView, basicSetup } from "codemirror";
@@ -329,6 +331,7 @@ export default function EditorPage({
 
   // Historique des versions (F05)
   const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [showEditorsModal, setShowEditorsModal] = useState<boolean>(false);
   const [versions, setVersions] = useState<VersionItem[]>([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
@@ -372,7 +375,7 @@ export default function EditorPage({
         }
       }
     } catch {
-      // Ignorer
+      /* Erreur réseau lors du chargement des versions */
     } finally {
       setHistoryLoading(false);
     }
@@ -511,7 +514,7 @@ export default function EditorPage({
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch {
-      // Ignorer
+      /* Presse-papiers non accessible dans ce contexte */
     }
   };
 
@@ -626,7 +629,7 @@ export default function EditorPage({
                 }
               }
             } catch {
-              // Ignorer erreurs de payload
+              /* Données de message non décodables ignorées */
             }
           },
           onClose(event) {
@@ -962,6 +965,18 @@ export default function EditorPage({
               <Maximize2 className="w-4 h-4" />
             </button>
 
+            {/* Bouton Rédacteurs & Crédits pour le propriétaire */}
+            {role === "owner" && (
+              <button
+                onClick={() => setShowEditorsModal(true)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Consulter les rédacteurs et leurs crédits restants"
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden sm:inline">Rédacteurs & crédits</span>
+              </button>
+            )}
+
             {/* Bouton d'accès au tiroir Historique */}
             <button
               onClick={() => {
@@ -1253,7 +1268,7 @@ export default function EditorPage({
           </button>
         )}
 
-        {/* PANNEAU GAUCHE : ÉDITEUR SOURÇE CODEMIRROR */}
+        {/* Panneau gauche : Éditeur source CodeMirror */}
         {(viewMode === "editor" || viewMode === "split") && (
           <div
             className={`h-full overflow-y-auto flex justify-center py-6 px-4 relative ${
@@ -1273,7 +1288,7 @@ export default function EditorPage({
           </div>
         )}
 
-        {/* PANNEAU DROIT : APERÇU EN TEMPS RÉEL TYPE OVERLEAF */}
+        {/* Panneau droit : Rendu direct de la feuille */}
         {(viewMode === "preview" || viewMode === "split") && (
           <div
             className={`h-full overflow-y-auto bg-stone-200/70 dark:bg-slate-950/80 flex flex-col items-center py-4 px-3 sm:px-6 relative ${
@@ -1547,6 +1562,15 @@ export default function EditorPage({
             </div>
           </div>
         </div>
+      )}
+      {/* Modal Rédacteurs & Crédits pour le propriétaire */}
+      {role === "owner" && (
+        <EditorsModal
+          docId={docId}
+          docTitle={docTitle}
+          isOpen={showEditorsModal}
+          onClose={() => setShowEditorsModal(false)}
+        />
       )}
     </div>
   );

@@ -154,6 +154,31 @@ Retourne le détail d'un document, la liste de ses collaborateurs et son rôle c
 Supprime un document (action strictement réservée au propriétaire `owner`).
 - **Réponse 200** : `{ "success": true }`
 
+### `GET /api/documents/:docId/share`
+Permet au propriétaire du document de consulter la liste des collaborateurs et leur solde de crédit d'écriture restant en temps réel (quota UTF-16 de 10 000 caractères par jour). Également disponible sur `/api/documents/:docId/editors`.
+- **Autorisation** : Session requise, rôle `owner` sur le document.
+- **Réponse 200** :
+  ```json
+  {
+    "editors": [
+      {
+        "writerId": "writer-alice",
+        "name": "Alice Martin",
+        "email": "alice@asso.fr",
+        "role": "owner",
+        "createdAt": 1730000000,
+        "credit": {
+          "used": 1500,
+          "remaining": 8500,
+          "dailyLimit": 10000,
+          "resetAt": 1730073600
+        }
+      }
+    ]
+  }
+  ```
+- **Erreurs** : `401 Unauthorized` si session absente, `403 Forbidden` si le demandeur n'est pas le propriétaire du document.
+
 ### `POST /api/documents/:docId/share`
 Ajoute ou modifie le rôle d'un collaborateur (réservé au propriétaire).
 - **Corps de requête** :
@@ -174,7 +199,8 @@ Révoque les droits d'un collaborateur sur le document.
 ## 4. Liens et Téléchargements Publics (C1 & C3)
 
 ### `POST /api/documents/:docId/links`
-Crée un lien de diffusion public avec quota maximal d'exemplaires (`maxDownloads`).
+Crée un lien de diffusion public avec quota maximal d'exemplaires (`maxDownloads`). Action strictement réservée au propriétaire du document (`owner`).
+- **Autorisation** : Session requise, rôle `owner` sur le document.
 - **Corps de requête** :
   ```json
   {

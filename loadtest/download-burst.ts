@@ -498,13 +498,13 @@ export async function runDownloadBurst(options?: {
 
 | Critère | Attendu | Obtenu | Statut |
 | :--- | :--- | :--- | :--- |
-| **Invariant C1 : Copies accordées en base (links.issued)** | Exactement ${MAX_COPIES} | **${dbIssuedCount}** | ${c1Strict ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Invariant C1 : URLs pré-signées distinctes reçues** | Exactement ${dbIssuedCount} | **${presignedUrls.size}** | ${c1Distinct ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Invariant C6 : Intervalle dernier granted -> 1er exhausted** | < 1000 ms (cache 1s) | **${c6Gap !== null ? `${c6Gap} ms` : "N/A"}** | ${c6Gap !== null && c6Gap <= 1500 ? "✅ VALIDÉ" : "ℹ️ MESURÉ"} |
-| **Requêtes sans état explicite** | 0 | **${unhandledCount}** | ${unhandledCount === 0 ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Erreurs 5xx (serveur)** | 0 | **${errors5xxCount}** | ${errors5xxCount === 0 ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Erreurs réseau client** | 0 | **${networkErrorsCount}** | ${networkErrorsCount === 0 ? "✅ VALIDÉ" : "⚠️ ERREURS"} |
-| **Objectif de latence p95 (requête initiale)** | < ${TARGET_P95_MS} ms | **${initialStats.p95} ms** | ${initialStats.p95 < TARGET_P95_MS ? "✅ VALIDÉ" : "⚠️ ÉCHEC / LIMITE"} |
+| **Invariant C1 : Copies accordées en base (links.issued)** | Exactement ${MAX_COPIES} | **${dbIssuedCount}** | ${c1Strict ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Invariant C1 : URLs pré-signées distinctes reçues** | Exactement ${dbIssuedCount} | **${presignedUrls.size}** | ${c1Distinct ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Invariant C6 : Intervalle dernier granted -> 1er exhausted** | < 1000 ms (cache 1s) | **${c6Gap !== null ? `${c6Gap} ms` : "N/A"}** | ${c6Gap !== null && c6Gap <= 1500 ? "[VALIDÉ]" : "[MESURÉ]"} |
+| **Requêtes sans état explicite** | 0 | **${unhandledCount}** | ${unhandledCount === 0 ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Erreurs 5xx (serveur)** | 0 | **${errors5xxCount}** | ${errors5xxCount === 0 ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Erreurs réseau client** | 0 | **${networkErrorsCount}** | ${networkErrorsCount === 0 ? "[VALIDÉ]" : "[ERREURS]"} |
+| **Objectif de latence p95 (requête initiale)** | < ${TARGET_P95_MS} ms | **${initialStats.p95} ms** | ${initialStats.p95 < TARGET_P95_MS ? "[VALIDÉ]" : "[LIMITE ATTEINTE]"} |
 
 ---
 

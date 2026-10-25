@@ -8,7 +8,7 @@ export const metadata = {
 };
 
 export default function UiKitPage() {
-  // Page accessible uniquement hors production (SPEC_UI_AGENT.txt § 2.6)
+  // Page accessible uniquement hors production (environnement de développement)
   if (process.env.NODE_ENV === "production") {
     notFound();
   }

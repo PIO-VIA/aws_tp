@@ -321,11 +321,11 @@ export function generateReportContent(options?: {
 
 | Échelle / Scénario d'évaluation | Mesuré ? | Résultat / Métrique clé | Statut | Limite rencontrée / Observation |
 | :--- | :---: | :--- | :---: | :--- |
-| **Charge nominale de téléchargement (600 visiteurs / 500 copies)** | **OUI** | ${run600 ? `${run600.metrics.grantedCount} accordés, C1: ${run600.metrics.distinctPresignedUrls}/${run600.config.maxCopies} URLs` : "N/A"} | ${run600?.invariants.c1RespectStrict && run600?.invariants.c1DistinctUrlsMatchIssued ? "✅ RÉUSSI" : "❌ ÉCHEC"} | ${run600 && run600.metrics.initialLatenciesMs.p95 > 250 ? `p95 initial = ${run600.metrics.initialLatenciesMs.p95} ms (dépasse objectif de 250 ms sous Next.js local)` : "Conforme"} |
-| **15 000 visiteurs (Pic de téléchargement)** | **OUI** | ${run15k ? `${run15k.metrics.totalRequests} requêtes reçues, ${run15k.metrics.dbIssuedCount} copies en DB` : "N/A"} | ${run15k && run15k.metrics.dbIssuedCount === run15k.config.maxCopies ? "✅ RÉUSSI (C1)" : "❌ ÉCHEC"} | ${run15k && run15k.metrics.networkErrorsCount > 0 ? `Limite locale : ${run15k.metrics.networkErrorsCount} erreurs réseau client (saturation des sockets loopback)` : "Mesure complète"} |
-| **300 rédacteurs simultanés (collab-sim)** | **OUI** | ${runCollab300 ? `${runCollab300.config.totalWriters} rédacteurs sur ${runCollab300.config.docCount} docs, ${runCollab300.metrics.totalPropagationsObserved} propagations` : "N/A"} | ${runCollab300?.invariants.c2ConvergenceStrict ? "✅ RÉUSSI" : "❌ ÉCHEC"} | ${runCollab300 && runCollab300.metrics.latenciesMs.p95 > 200 ? `p95 = ${runCollab300.metrics.latenciesMs.p95} ms (objectif 200 ms dépassé sous charge locale forte), CPU serveur = ${runCollab300.metrics.serverCpu.totalMs} ms (~${runCollab300.metrics.serverCpu.percentOfOneCore}% d'un cœur)` : "Conforme"} |
-| **Test combiné (Téléchargement + Collaboration)** | **OUI** | ${runCombined ? `${runCombined.config.downloadVisitors} visiteurs + ${runCombined.config.collabWriters} rédacteurs conjoints` : "N/A"} | ${runCombined?.invariants.c1RespectStrict && runCombined?.invariants.c2ConvergenceStrict ? "✅ RÉUSSI" : "❌ ÉCHEC"} | Pic simultané : C1 validé (${runCombined?.downloadBurst.distinctPresignedUrls} URLs) et convergence Yjs stricte maintenue |
-| **Déploiement AWS réel** | **NON** | Infrastructure définie dans Terraform (C-10) | ℹ️ NON MESURÉ | Validation locale sur conteneurs Docker (DynamoDB Local, MinIO S3, ElasticMQ SQS, Mailpit) |
+| **Charge nominale de téléchargement (600 visiteurs / 500 copies)** | **OUI** | ${run600 ? `${run600.metrics.grantedCount} accordés, C1: ${run600.metrics.distinctPresignedUrls}/${run600.config.maxCopies} URLs` : "N/A"} | ${run600?.invariants.c1RespectStrict && run600?.invariants.c1DistinctUrlsMatchIssued ? "[SUCCÈS]" : "[ÉCHEC]"} | ${run600 && run600.metrics.initialLatenciesMs.p95 > 250 ? `p95 initial = ${run600.metrics.initialLatenciesMs.p95} ms (dépasse objectif de 250 ms sous Next.js local)` : "Conforme"} |
+| **15 000 visiteurs (Pic de téléchargement)** | **OUI** | ${run15k ? `${run15k.metrics.totalRequests} requêtes reçues, ${run15k.metrics.dbIssuedCount} copies en DB` : "N/A"} | ${run15k && run15k.metrics.dbIssuedCount === run15k.config.maxCopies ? "[SUCCÈS (C1)]" : "[ÉCHEC]"} | ${run15k && run15k.metrics.networkErrorsCount > 0 ? `Limite locale : ${run15k.metrics.networkErrorsCount} erreurs réseau client (saturation des sockets loopback)` : "Mesure complète"} |
+| **300 rédacteurs simultanés (collab-sim)** | **OUI** | ${runCollab300 ? `${runCollab300.config.totalWriters} rédacteurs sur ${runCollab300.config.docCount} docs, ${runCollab300.metrics.totalPropagationsObserved} propagations` : "N/A"} | ${runCollab300?.invariants.c2ConvergenceStrict ? "[SUCCÈS]" : "[ÉCHEC]"} | ${runCollab300 && runCollab300.metrics.latenciesMs.p95 > 200 ? `p95 = ${runCollab300.metrics.latenciesMs.p95} ms (objectif 200 ms dépassé sous charge locale forte), CPU serveur = ${runCollab300.metrics.serverCpu.totalMs} ms (~${runCollab300.metrics.serverCpu.percentOfOneCore}% d'un cœur)` : "Conforme"} |
+| **Test combiné (Téléchargement + Collaboration)** | **OUI** | ${runCombined ? `${runCombined.config.downloadVisitors} visiteurs + ${runCombined.config.collabWriters} rédacteurs conjoints` : "N/A"} | ${runCombined?.invariants.c1RespectStrict && runCombined?.invariants.c2ConvergenceStrict ? "[SUCCÈS]" : "[ÉCHEC]"} | Pic simultané : C1 validé (${runCombined?.downloadBurst.distinctPresignedUrls} URLs) et convergence Yjs stricte maintenue |
+| **Déploiement AWS réel** | **NON** | Infrastructure définie dans Terraform (C-10) | [NON MESURÉ] | Validation locale sur conteneurs Docker (DynamoDB Local, MinIO S3, ElasticMQ SQS, Mailpit) |
 
 ---
 
@@ -356,11 +356,11 @@ export function generateReportContent(options?: {
     md += `\n### Suite : ${s.category} (\`${path.basename(s.filePath)}\`)\n\n`;
     for (const testFile of s.data.testResults) {
       const relName = path.basename(testFile.name);
-      md += `#### Fichier \`${relName}\` (${testFile.status === "passed" ? "✅ SUCCÈS" : "❌ ÉCHEC"})\n\n`;
+      md += `#### Fichier \`${relName}\` (${testFile.status === "passed" ? "[SUCCÈS]" : "[ÉCHEC]"})\n\n`;
       md += `| Test / Assertion | Durée | Statut |\n`;
       md += `| :--- | :---: | :---: |\n`;
       for (const t of testFile.assertionResults) {
-        const icon = t.status === "passed" ? "✅ PASS" : t.status === "failed" ? "❌ FAIL" : "⚠️ SKIP";
+        const icon = t.status === "passed" ? "[PASS]" : t.status === "failed" ? "[ÉCHEC]" : "[IGNORÉ]";
         const dur = Math.round(t.duration * 10) / 10;
         md += `| ${t.fullName || t.title} | ${dur} ms | ${icon} |\n`;
       }
@@ -395,8 +395,8 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 | **Copies accordées en base (\`links.issued\`)** | **${run600?.metrics.dbIssuedCount ?? "N/A"}** | **${run15k?.metrics.dbIssuedCount ?? "N/A"}** |
 | **URLs pré-signées distinctes reçues** | **${run600?.metrics.distinctPresignedUrls ?? "N/A"}** | **${run15k?.metrics.distinctPresignedUrls ?? "N/A"}** |
 | **Refus pour épuisement (\`exhausted\`)** | ${run600?.metrics.exhaustedCount ?? "N/A"} | ${run15k?.metrics.exhaustedCount ?? "N/A"} |
-| **Invariant C1 (Copies en DB == MAX_COPIES)** | ${run600?.invariants.c1RespectStrict ? "✅ VALIDÉ" : "❌ ÉCHEC"} | ${run15k?.invariants.c1RespectStrict ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Invariant C1 (URLs distinctes == Copies)** | ${run600?.invariants.c1DistinctUrlsMatchIssued ? "✅ VALIDÉ" : "❌ ÉCHEC"} | ${run15k?.invariants.c1DistinctUrlsMatchIssued ? "✅ VALIDÉ" : "⚠️ CLIENT TIMEOUT"} |
+| **Invariant C1 (Copies en DB == MAX_COPIES)** | ${run600?.invariants.c1RespectStrict ? "[VALIDÉ]" : "[ÉCHEC]"} | ${run15k?.invariants.c1RespectStrict ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Invariant C1 (URLs distinctes == Copies)** | ${run600?.invariants.c1DistinctUrlsMatchIssued ? "[VALIDÉ]" : "[ÉCHEC]"} | ${run15k?.invariants.c1DistinctUrlsMatchIssued ? "[VALIDÉ]" : "[TIMEOUT CLIENT]"} |
 | **Invariant C6 (Dernier accordé $\\to$ 1er épuisé)** | **${run600?.metrics.c6LastGrantedToFirstExhaustedMs !== null ? `${run600?.metrics.c6LastGrantedToFirstExhaustedMs} ms` : "N/A"}** | **${run15k?.metrics.c6LastGrantedToFirstExhaustedMs !== null ? `${run15k?.metrics.c6LastGrantedToFirstExhaustedMs} ms` : "N/A"}** |
 | **Erreurs serveur 5xx** | **${run600?.metrics.errors5xxCount ?? 0}** | **${run15k?.metrics.errors5xxCount ?? 0}** |
 | **Erreurs réseau client** | ${run600?.metrics.networkErrorsCount ?? 0} | ${run15k?.metrics.networkErrorsCount ?? 0} (saturation loopback) |
@@ -412,7 +412,7 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 - **Éditions transmises** : ${runCollab300?.metrics.totalEditsSent ?? "N/A"}
 - **Propagations WebSocket observées** : **${runCollab300?.metrics.totalPropagationsObserved ?? "N/A"}**
 - **Refus d'écriture** : ${(runCollab300?.metrics as unknown as Record<string, unknown>)?.writeRefusedCount ?? runCollab300?.metrics.totalRefused ?? 0}
-- **Invariant C2 (Convergence CRDT sans conflit)** : ${runCollab300?.invariants.c2ConvergenceStrict ? "**✅ STRICTEMENT IDENTIQUE ENTRE TOUS LES PAIRS**" : "**❌ DIVERGENCE**"}
+- **Invariant C2 (Convergence CRDT sans conflit)** : ${runCollab300?.invariants.c2ConvergenceStrict ? "**[STRICTEMENT IDENTIQUE ENTRE TOUS LES PAIRS]**" : "**[DIVERGENCE]**"}
 - **Tailles finales des documents** : ${((runCollab300?.metrics as unknown as Record<string, unknown>)?.finalTextLengths as number[] | undefined)?.join(" car., ") ?? runCollab300?.metrics?.finalDocLengths?.join(" car., ") ?? "N/A"} car.
 - **Distribution des latences de propagation Yjs** :
   - **Min** : ${runCollab300?.metrics.latenciesMs.min ?? "N/A"} ms
@@ -431,12 +431,12 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 
 - **Fichier brut** : \`${runCombined?.file || "N/A"}\`
 - **Téléchargement conjoint** : ${runCombined?.config.downloadVisitors ?? "N/A"} visiteurs pour ${runCombined?.config.downloadCopies ?? "N/A"} exemplaires
-  - **Copies en base (\`links.issued\`)** : **${runCombined?.downloadBurst.dbIssuedCount ?? "N/A"}** (${runCombined?.invariants.c1RespectStrict ? "✅ VALIDÉ" : "❌ ÉCHEC"})
-  - **URLs distinctes émises** : **${runCombined?.downloadBurst.distinctPresignedUrls ?? "N/A"}** (${runCombined?.invariants.c1DistinctUrlsMatchIssued ? "✅ VALIDÉ" : "❌ ÉCHEC"})
+  - **Copies en base (\`links.issued\`)** : **${runCombined?.downloadBurst.dbIssuedCount ?? "N/A"}** (${runCombined?.invariants.c1RespectStrict ? "[VALIDÉ]" : "[ÉCHEC]"})
+  - **URLs distinctes émises** : **${runCombined?.downloadBurst.distinctPresignedUrls ?? "N/A"}** (${runCombined?.invariants.c1DistinctUrlsMatchIssued ? "[VALIDÉ]" : "[ÉCHEC]"})
   - **Latence p95 initiale** : ${runCombined?.downloadBurst.initialLatenciesMs.p95 ?? "N/A"} ms
 - **Collaboration conjointe** : ${runCombined?.config.collabWriters ?? "N/A"} rédacteurs simultanés
   - **Propagations observées** : ${runCombined?.collabSim.totalPropagationsObserved ?? "N/A"}
-  - **Convergence CRDT** : ${runCombined?.invariants.c2ConvergenceStrict ? "✅ CONVERGENCE STRICTE" : "❌ ÉCHEC"}
+  - **Convergence CRDT** : ${runCombined?.invariants.c2ConvergenceStrict ? "[CONVERGENCE STRICTE]" : "[ÉCHEC]"}
   - **Latence p95 de propagation** : ${runCombined?.collabSim.latenciesMs.p95 ?? "N/A"} ms
   - **CPU Serveur Hocuspocus** : ${runCombined?.collabSim.serverCpu.totalMs ?? "N/A"} ms (~${runCombined?.collabSim.serverCpu.percentOfOneCore ?? "N/A"}% d'un cœur)
 
@@ -446,16 +446,16 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 
 | Invariant / Objectif | Contrainte Spécifiée | Valeur Mesurée | Statut |
 | :--- | :--- | :--- | :---: |
-| **C1 : Capacité stricte de téléchargement** | \`links.issued <= maxDownloads\` | **${run600?.metrics.dbIssuedCount ?? 0} = ${run600?.config.maxCopies ?? 0}** | **✅ RÉUSSI** |
-| **C1 : Émission d'URLs pré-signées distinctes** | URLs distinctes = copies accordées | **${run600?.metrics.distinctPresignedUrls ?? 0} = ${run600?.metrics.dbIssuedCount ?? 0}** | **✅ RÉUSSI** |
-| **C2 : Convergence CRDT sans conflit** | 100 % cohérence entre pairs connectés | **Hash et textes 100% identiques** | **✅ RÉUSSI** |
-| **C2 : Aucune perte d'update acquitté** | Journalisation write-ahead dans DynamoDB | **0 update perdu (test crash & compaction)** | **✅ RÉUSSI** |
-| **C3 : Rendu PDF versionné et déterministe** | PDF immuable par hash de version | **Hash SHA-256 déterministe, single-flight** | **✅ RÉUSSI** |
-| **C4 : Plafond journalier de 10 000 caractères** | 10 000 unités UTF-16, retransmissions gratuites | **Plafond appliqué, 0 débit sur doublon** | **✅ RÉUSSI** |
-| **C5 : Aucun visiteur jeté sans état explicite** | Zéro 429 / 503 sec, réponses 200/202 explicites | **0 requête sans état, 0 erreur 5xx** | **✅ RÉUSSI** |
-| **C6 : Notification immédiate d'épuisement** | Délai dernier accordé $\\to$ 1er épuisé < 1s | **${run600?.metrics.c6LastGrantedToFirstExhaustedMs ?? "N/A"} ms** | **✅ RÉUSSI** |
-| **Perf : Latence initiale de téléchargement p95** | < 250 ms | **${run600?.metrics.initialLatenciesMs.p95 ?? "N/A"} ms** | **${run600 && run600.metrics.initialLatenciesMs.p95 < 250 ? "✅ RÉUSSI" : "⚠️ ÉCHEC / LIMITE"}** |
-| **Perf : Latence de propagation collaborative p95** | < 200 ms | **${runCollab300?.metrics.latenciesMs.p95 ?? "N/A"} ms** | **${runCollab300 && runCollab300.metrics.latenciesMs.p95 < 200 ? "✅ RÉUSSI" : "⚠️ ÉCHEC / LIMITE"}** |
+| **C1 : Capacité stricte de téléchargement** | \`links.issued <= maxDownloads\` | **${run600?.metrics.dbIssuedCount ?? 0} = ${run600?.config.maxCopies ?? 0}** | **[SUCCÈS]** |
+| **C1 : Émission d'URLs pré-signées distinctes** | URLs distinctes = copies accordées | **${run600?.metrics.distinctPresignedUrls ?? 0} = ${run600?.metrics.dbIssuedCount ?? 0}** | **[SUCCÈS]** |
+| **C2 : Convergence CRDT sans conflit** | 100 % cohérence entre pairs connectés | **Hash et textes 100% identiques** | **[SUCCÈS]** |
+| **C2 : Aucune perte d'update acquitté** | Journalisation write-ahead dans DynamoDB | **0 update perdu (test crash & compaction)** | **[SUCCÈS]** |
+| **C3 : Rendu PDF versionné et déterministe** | PDF immuable par hash de version | **Hash SHA-256 déterministe, single-flight** | **[SUCCÈS]** |
+| **C4 : Plafond journalier de 10 000 caractères** | 10 000 unités UTF-16, retransmissions gratuites | **Plafond appliqué, 0 débit sur doublon** | **[SUCCÈS]** |
+| **C5 : Aucun visiteur jeté sans état explicite** | Zéro 429 / 503 sec, réponses 200/202 explicites | **0 requête sans état, 0 erreur 5xx** | **[SUCCÈS]** |
+| **C6 : Notification immédiate d'épuisement** | Délai dernier accordé $\\to$ 1er épuisé < 1s | **${run600?.metrics.c6LastGrantedToFirstExhaustedMs ?? "N/A"} ms** | **[SUCCÈS]** |
+| **Perf : Latence initiale de téléchargement p95** | < 250 ms | **${run600?.metrics.initialLatenciesMs.p95 ?? "N/A"} ms** | **${run600 && run600.metrics.initialLatenciesMs.p95 < 250 ? "[SUCCÈS]" : "[LIMITE ATTEINTE]"}** |
+| **Perf : Latence de propagation collaborative p95** | < 200 ms | **${runCollab300?.metrics.latenciesMs.p95 ?? "N/A"} ms** | **${runCollab300 && runCollab300.metrics.latenciesMs.p95 < 200 ? "[SUCCÈS]" : "[LIMITE ATTEINTE]"}** |
 
 ---
 

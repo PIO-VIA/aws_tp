@@ -95,7 +95,7 @@ export default function DownloadPage({
           return;
         }
 
-        // Toujours en préparation
+        // Document en cours de rendu asynchrone par le service PDF
         const nextMs = data.retryAfterMs || Math.round(retryMs * 1.2);
         pollingRef.current = setTimeout(() => poll(nextMs), nextMs);
       } catch {
@@ -131,7 +131,7 @@ export default function DownloadPage({
             }
           }
         } catch {
-          // Ignorer et basculer sur la vérification du lien
+          /* En cas d'erreur de réservation, vérifier le statut global du lien */
         }
       }
 

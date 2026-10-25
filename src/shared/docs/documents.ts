@@ -11,6 +11,7 @@ import { tableName } from "../config";
 import { hashEmail, SessionPayload } from "../auth/jwt";
 import { LinkRecord } from "../links/types";
 import { log } from "../log";
+import { getWriterQuota } from "../quota/quota";
 
 export type DocumentRole = "owner" | "editor" | "viewer";
 
@@ -307,5 +308,71 @@ export async function getDocumentById(docId: string): Promise<DocumentRecord | n
     }),
   );
   return (res.Item as DocumentRecord) ?? null;
+}
+
+export interface DocumentEditorWithCredit {
+  writerId: string;
+  name: string;
+  email: string;
+  role: DocumentRole;
+  createdAt: number;
+  credit: {
+    used: number;
+    remaining: number;
+    dailyLimit: number;
+    resetAt: number;
+  };
+}
+
+/**
+ * Récupère la liste des rédacteurs autorisés sur un document ainsi que leur crédit d'écriture restant.
+ * Seul le propriétaire du document peut exécuter cette requête.
+ */
+export async function listDocumentEditorsWithCredits(
+  docId: string,
+  requesterId: string,
+): Promise<DocumentEditorWithCredit[]> {
+  const perm = await getDocumentPermission(docId, requesterId);
+  if (!perm || perm.role !== "owner") {
+    throw new Error("Seul le propriétaire peut consulter les rédacteurs et leurs crédits");
+  }
+
+  const docClient = getDocClient();
+  const permsTable = tableName("doc_permissions");
+
+  const res = await docClient.send(
+    new QueryCommand({
+      TableName: permsTable,
+      KeyConditionExpression: "docId = :docId",
+      ExpressionAttributeValues: { ":docId": docId },
+    }),
+  );
+
+  const permissions = (res.Items as DocumentPermissionRecord[]) ?? [];
+
+  const results = await Promise.all(
+    permissions.map(async (p) => {
+      const quota = await getWriterQuota(p.writerId);
+      return {
+        writerId: p.writerId,
+        name: p.name,
+        email: p.email,
+        role: p.role,
+        createdAt: p.createdAt,
+        credit: {
+          used: quota.used,
+          remaining: quota.remaining,
+          dailyLimit: quota.dailyLimit,
+          resetAt: quota.resetAt,
+        },
+      };
+    }),
+  );
+
+  return results.sort((a, b) => {
+    if (a.role === "owner" && b.role !== "owner") return -1;
+    if (b.role === "owner" && a.role !== "owner") return 1;
+    return a.name.localeCompare(b.name);
+  });
 }
 

@@ -32,11 +32,11 @@ export async function POST(
     );
   }
 
-  // Vérification permission (owner ou editor requis)
+  // Vérification permission : seul le propriétaire peut créer un lien de téléchargement
   const perm = await getDocumentPermission(docId, session.writer.id);
-  if (!perm || perm.role === "viewer") {
+  if (!perm || perm.role !== "owner") {
     return NextResponse.json(
-      { error: { code: "forbidden", message: "Droits insuffisants (owner ou editor requis)" } },
+      { error: { code: "forbidden", message: "Seul le propriétaire du document peut créer un lien de téléchargement" } },
       { status: 403 },
     );
   }

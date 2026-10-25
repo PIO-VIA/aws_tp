@@ -275,7 +275,7 @@ export function Logo({
   const gapClasses =
     pixelSize <= 20 ? "gap-1.5" : pixelSize <= 32 ? "gap-2.5" : pixelSize <= 48 ? "gap-3" : "gap-4";
 
-  // 1. VARIANTE : MARQUE SEULE (SYMBOLE)
+  // Variante : marque seule (symbole)
   if (variant === "mark") {
     return (
       <div
@@ -309,7 +309,7 @@ export function Logo({
     </span>
   );
 
-  // 2. VARIANTE : EMPILÉ (STACKED) POUR ÉCRANS DE CONNEXION ET D'ERREUR
+  // Variante : empilée (écrans de connexion et d'erreur)
   if (variant === "stacked") {
     return (
       <div
@@ -339,7 +339,7 @@ export function Logo({
     );
   }
 
-  // 3. VARIANTE PAR DÉFAUT : WORDMARK EN LIGNE (EN-TÊTES ET BARRES DE NAVIGATION)
+  // Variante par défaut : mot-symbole en ligne (en-têtes et barres de navigation)
   return (
     <div
       className={`inline-flex items-center ${gapClasses} ${className}`}

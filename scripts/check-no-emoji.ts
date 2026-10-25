@@ -3,7 +3,7 @@ import path from "path";
 
 /**
  * Garde-fou automatique : scripts/check-no-emoji.ts (npm run check:ui)
- * Conforme à SPEC_UI_AGENT.txt § 3.5.
+ * Contrôle qualité de la charte visuelle.
  * Parcourt app/ et src/components/ et échoue si un emoji ou l'un des glyphes
  * interdits (✕, ✓, ✔, ✖, ←, →, ↑, ↓, ⚠, etc.) est trouvé dans le code JSX ou source.
  */
@@ -90,7 +90,7 @@ function main() {
       console.error(`  - ${relPath}:${v.line} [symbole: "${v.char}"]`);
       console.error(`    Code : ${v.snippet}`);
     }
-    console.error("\nRègle : Remplacer par des composants de lucide-react conformément à SPEC_UI_AGENT.txt § 3.\n");
+    console.error("\nRègle : Remplacer par des composants de lucide-react conformément à la charte graphique de l'interface.\n");
     process.exit(1);
   }
 

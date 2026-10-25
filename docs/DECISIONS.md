@@ -2,7 +2,7 @@
 # DECISIONS.md — Journal des décisions
 
 Projet : éditeur de documents collaboratif sur AWS.
-Version initiale : 24 octobre 2026. Ce fichier est **vivant** : l'agent et toi y ajoutez chaque nouvelle décision ou tout écart par rapport à la spécification (`SPEC_AGENT_editeur_collaboratif.txt`).
+Version : 1.0 — 25 octobre 2026. Ce document consigne l'ensemble des décisions d'architecture (ADR), les choix d'ingénierie et les compromis d'implémentation du projet.
 
 Format d'une ligne : **décision**, raison, alternative écartée, impact sur les invariants.
 Statut : `figée` (ne pas remettre en cause sans raison forte), `proposée` (à valider), `ouverte`.
@@ -103,20 +103,15 @@ Statut : `figée` (ne pas remettre en cause sans raison forte), `proposée` (à 
 | O-4 | Type d'instance EC2 (`t3.small` ou `t3.micro`)               | `t3.small` ; vérifier l'éligibilité et la mémoire disponible |
 | O-5 | Alias Lambda `live` pour le retour arrière                    | Si le temps le permet                                              |
 
-## 9. Constats et décisions de l'agent (à remplir)
+## 9. Constats techniques et décisions d'architecture
 
-### 9.1 Constats sur le projet Next.js existant
+### 9.1 Synthèse de l'environnement Next.js
 
-- Version de Next.js :
-- Router (App Router ou Pages Router) :
-- Gestionnaire de paquets :
-- Tailwind / UI existante :
-- Éléments conservés tels quels :
-- Version de Next.js : 16.4.3 (avec React 19.3.0)
-- Router (App Router ou Pages Router) : App Router (`app/`)
-- Gestionnaire de paquets : npm (avec package-lock.json)
-- Tailwind / UI existante : Tailwind CSS v4 (`@tailwindcss/turbopack`, `@import "tailwindcss";`), polices Google Geist via `next/font/google`
-- Éléments conservés tels quels : structure de base `app/layout.tsx`, `app/globals.css`, configuration Turbopack et ESLint
+- **Version de Next.js** : 16.4.3 (avec React 19.3.0)
+- **Router** : App Router (`app/`)
+- **Gestionnaire de paquets** : npm (avec `package-lock.json`)
+- **Framework CSS** : Tailwind CSS v4 (`@tailwindcss/turbopack`, `@import "tailwindcss";`), polices Google Geist via `next/font/google`
+- **Éléments de base conservés** : structure `app/layout.tsx`, `app/globals.css`, configuration Turbopack et ESLint
 - Éléments modifiés (et pourquoi) :
   - `tsconfig.json` : ajout du path `@shared/*` -> `./src/shared/*` pour les imports partagés ; cible ES2022 ; exclusion de `dist/` et `loadtest/`.
   - `.gitignore` : autorisation de commit pour `.env.example`, exclusion de `dist/`, `.terraform/`, `*.tfstate*`, `backend.hcl`, `*.tfvars`.
@@ -222,7 +217,7 @@ AssertionError: expected 7 to be 1 // Object.is equality
 + Received
 - 1
 + 7
- ❯ tests/scenarios/sc06-notifications-and-scans.test.ts:101:23
+  tests/scenarios/sc06-notifications-and-scans.test.ts:101:23
     100|
     101|     expect(data.total).toBe(1);
        |                        ^
@@ -235,7 +230,7 @@ TypeError: sendLastCopyNotification is not a function
 ```text
 FAIL  tests/scenarios/sc04b-burst-and-session-block.test.ts > SC04b — Détection de rafale et blocage en cours de session (C-03 / F09) > T1. Rafale : un client envoie 400 updates en 2s -> refus rate_limited, blocage pour abus, document = updates acceptés
 AssertionError: expected 0 to be greater than 0
- ❯ tests/scenarios/sc04b-burst-and-session-block.test.ts:135:35
+  tests/scenarios/sc04b-burst-and-session-block.test.ts:135:35
     133|
     134|     // Des refus rate_limited doivent avoir été émis
     135|     expect(refusedReasons.length).toBeGreaterThan(0);
@@ -249,7 +244,7 @@ AssertionError: expected false to be true // Object.is equality
 + Received
 - true
 + false
- ❯ tests/scenarios/sc04b-burst-and-session-block.test.ts:202:65
+  tests/scenarios/sc04b-burst-and-session-block.test.ts:202:65
     200|
     201|     // L'update doit être refusé avec reason "blocked" et la connexion fermée avec 4403
     202|     expect(refusedMessages.some((m) => m.reason === "blocked")).toBe(true);
@@ -259,11 +254,11 @@ AssertionError: expected false to be true // Object.is equality
 ```text
 FAIL  tests/integration/c05-advance-reservation.test.ts > C-05 — Réservation orpheline et reprise (advanceReservation) > T1. getHead échoue au premier appel : réponse 202 avec reservationId ; 2ème appel (même requestId) aboutit ; links.issued n'augmente que de 1
 Error: Injection panne transitoire getHead
- ❯ tests/integration/c05-advance-reservation.test.ts:96:7
+  tests/integration/c05-advance-reservation.test.ts:96:7
 
 FAIL  tests/integration/c05-advance-reservation.test.ts > C-05 — Réservation orpheline et reprise (advanceReservation) > T3. Deux advanceReservation concurrents sur la même réservation : un seul versionId écrit, une seule URL émise
 TypeError: advanceReservation is not a function
- ❯ tests/integration/c05-advance-reservation.test.ts:299:7
+  tests/integration/c05-advance-reservation.test.ts:299:7
 ```
 
 #### C-04 : Rendu PDF hors du PDF-Worker (polling download-api et collab)
@@ -286,7 +281,7 @@ AssertionError: expected 'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD…' to be 'DDDDD
 - Expected: 1000 caractères
 - Received: 945 caractères (mises à jour concurrentes perdues lors de la compaction et purge du journal)
 
- ❯ runConcurrentWritesTest tests/scenarios/sc01b-snapshot-concurrent-writes.test.ts:214:24
+  runConcurrentWritesTest tests/scenarios/sc01b-snapshot-concurrent-writes.test.ts:214:24
     212|     const head = await getHead(docId);
     213|
     214|     expect(loadedText).toBe(expectedText);
@@ -316,7 +311,7 @@ AssertionError: expected 'http://localhost:9000/...Date=20261024T214921Z...' to 
 ```text
 FAIL  tests/unit/loadtest-open-loop.test.ts > Planification en boucle ouverte (Open Loop - C-08) > T1. Répartition 80% première minute / 20% 4 minutes suivantes
 Error: Cannot find module '../../loadtest/scheduler'
- ❯ tests/unit/loadtest-open-loop.test.ts:4:33
+  tests/unit/loadtest-open-loop.test.ts:4:33
 ```
 - **Run 1 (600 visiteurs / 500 copies)** : `2026-10-25T01-13-09-504Z-download-burst.json`. Invariant C1 : 500/500 distinctes, 500 en DB, C6 -69 ms, 0 erreur 5xx, p95 6839 ms.
 - **Run 2 (15 000 visiteurs / 500 copies)** : `2026-10-25T01-14-35-006Z-download-burst.json`. 15 029 requêtes, C1 en base : 500/500, refus épuisement : 6 437, 0 5xx. Limite locale : saturation loopback réseau (8 070 erreurs réseau client).
@@ -327,7 +322,7 @@ Error: Cannot find module '../../loadtest/scheduler'
 ```text
 FAIL  tests/unit/gen-test-report.test.ts > C-09 : Génération automatique du rapport de tests (TEST_REPORT.md)
 Error: Cannot find module '../../scripts/gen-test-report'
- ❯ tests/unit/gen-test-report.test.ts:4:1
+  tests/unit/gen-test-report.test.ts:4:1
 ```
 - Script `scripts/gen-test-report.ts` et commande `npm run report`.
 - Génération automatisée de `docs/TEST_REPORT.md` à partir des sorties JSON de Vitest (`test-results/*.json`) et des exécutions de charge (`loadtest/results/*.json`).

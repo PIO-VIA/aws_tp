@@ -446,10 +446,10 @@ export async function runCollabSim(options?: {
 
 | Critère | Attendu | Obtenu | Statut |
 | :--- | :--- | :--- | :--- |
-| **Invariant C2 (Convergence CRDT sans conflit)** | 100 % identique entre pairs | **${convergenceMatch ? "Strictement identique" : "Divergence"}** | ${convergenceMatch ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Aucune perte d'édition** | Textes finaux non vides | **${finalTextLengths.join(" car., ")} car.** | ${summary.invariants.zeroWriteLoss ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Refus d'écriture (write_refused)** | Selon quotas | **${totalRefused}** | ℹ️ NORMAL |
-| **Latence p95 de propagation** | < ${TARGET_P95_MS} ms | **${p95} ms** | ${p95 < TARGET_P95_MS ? "✅ VALIDÉ" : "⚠️ ÉCHEC / LIMITE"} |
+| **Invariant C2 (Convergence CRDT sans conflit)** | 100 % identique entre pairs | **${convergenceMatch ? "Strictement identique" : "Divergence"}** | ${convergenceMatch ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Aucune perte d'édition** | Textes finaux non vides | **${finalTextLengths.join(" car., ")} car.** | ${summary.invariants.zeroWriteLoss ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Refus d'écriture (write_refused)** | Selon quotas | **${totalRefused}** | [NORMAL] |
+| **Latence p95 de propagation** | < ${TARGET_P95_MS} ms | **${p95} ms** | ${p95 < TARGET_P95_MS ? "[VALIDÉ]" : "[LIMITE ATTEINTE]"} |
 
 ---
 

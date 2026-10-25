@@ -116,11 +116,11 @@ export async function runCombinedLoadTest(): Promise<CombinedLoadTestSummary> {
 
 | Invariant | Attendu | Obtenu | Statut |
 | :--- | :--- | :--- | :--- |
-| **C1 (Capacité de téléchargement)** | Exactement ${downloadCopies} exemplaires | **${summary.downloadBurst.dbIssuedCount} en DB** | ${summary.invariants.c1RespectStrict ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **C1 (URLs distinctes)** | URLs distinctes = ${summary.downloadBurst.dbIssuedCount} | **${summary.downloadBurst.distinctPresignedUrls} URLs** | ${summary.invariants.c1DistinctUrlsMatchIssued ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **C2 (Convergence CRDT)** | 100 % cohérence entre pairs | **Convergence stricte** | ${summary.invariants.c2ConvergenceStrict ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Zéro 5xx** | 0 erreur serveur | **${summary.downloadBurst.errors5xxCount}** | ${summary.invariants.zeroErrors5xx ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Zéro requête non gérée** | 0 inconnu | **${summary.downloadBurst.unhandledCount}** | ${summary.invariants.zeroUnhandledRequests ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
+| **C1 (Capacité de téléchargement)** | Exactement ${downloadCopies} exemplaires | **${summary.downloadBurst.dbIssuedCount} en DB** | ${summary.invariants.c1RespectStrict ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **C1 (URLs distinctes)** | URLs distinctes = ${summary.downloadBurst.dbIssuedCount} | **${summary.downloadBurst.distinctPresignedUrls} URLs** | ${summary.invariants.c1DistinctUrlsMatchIssued ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **C2 (Convergence CRDT)** | 100 % cohérence entre pairs | **Convergence stricte** | ${summary.invariants.c2ConvergenceStrict ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Zéro 5xx** | 0 erreur serveur | **${summary.downloadBurst.errors5xxCount}** | ${summary.invariants.zeroErrors5xx ? "[VALIDÉ]" : "[ÉCHEC]"} |
+| **Zéro requête non gérée** | 0 inconnu | **${summary.downloadBurst.unhandledCount}** | ${summary.invariants.zeroUnhandledRequests ? "[VALIDÉ]" : "[ÉCHEC]"} |
 
 ---
 

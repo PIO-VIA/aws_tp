@@ -1,202 +1,206 @@
-# Éditeur Collaboratif de Documents & Téléchargement Versionné sur AWS
+# Éditeur Collaboratif de Documents & Diffusion Versionnée sur AWS
 
-Application web de rédaction collaborative en temps réel et de diffusion de documents PDF versionnés, conçue pour résister à des pics d'affluence extrêmes tout en garantissant des règles de capacité strictes, le respect d'invariants formels et une maîtrise totale des coûts sur AWS.
+[![Next.js](https://img.shields.io/badge/Next.js-16.4.3-black?logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19-blue?logo=react)](https://react.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-38bdf8?logo=tailwindcss)](https://tailwindcss.com/)
+[![AWS](https://img.shields.io/badge/AWS-Free%20Tier-ff9900?logo=amazon-aws)](https://aws.amazon.com/)
+[![Terraform](https://img.shields.io/badge/Terraform-1.10+-7b42bc?logo=terraform)](https://www.terraform.io/)
+[![Tests](https://img.shields.io/badge/Tests-64%2F64%20Pass-emerald)](./docs/TEST_REPORT.md)
 
----
-
-## 1. Caractéristiques Principales et Invariants
-
-- **Invariant C1 (Capacité de Téléchargement)** : Pour tout lien configuré avec $N$ exemplaires, il est garanti que $0 \le \text{URL émises} \le N$. La réservation est atomique sous concurrence via transaction DynamoDB `TransactWriteItems`, avec un chemin rapide en mémoire vive pour absorber les pics sans coût. Vérifié par les scénarios `SC02` et `SC02b` sur des centaines de requêtes concurrentes, et éprouvé sous pic de charge (15 000 requêtes dans `loadtest/results/`).
-- **Invariant C2 (Convergence CRDT)** : Édition collaborative concurrente de texte brut (`Y.Text` via CodeMirror 6 et Hocuspocus). Persistance synchrone par journalisation préalable en écriture (Write-Ahead Logging) dans DynamoDB avant toute diffusion aux pairs : aucune modification acquittée n'est perdue en cas d'interruption. Vérifié par `SC01`, `SC01b` et mesuré lors des tests de charge (89 100 propagations observées avec convergence stricte entre 300 rédacteurs simultanés).
-- **Invariant C3 (Immuabilité & Single-Flight PDF)** : Chaque version est identifiée de manière déterministe par le hachage SHA-256 de son texte UTF-8 (`pdfs/<docId>/<versionId>.pdf`). Rendu asynchrone déterministe via file SQS, avec verrou single-flight évitant tout recalcul redondant et remboursement automatique des réservations via DLQ en cas d'échec terminal. Vérifié par `c04-pdf-isolation` et `SC03`.
-- **Invariant C4 (Quota UTF-16 & Anti-Abus)** : Quota journalier strict de 10 000 caractères UTF-16 par rédacteur (remise à zéro à 00:00 UTC). Déduplication des retransmissions par `IntervalSet` (0 caractère refacturé). Vérifié par `SC04`.
-- **Détection de Rafale et Suspension d'Abus (C-03 / F09)** : Surveillance active du flux d'écriture en cours de session (`beforeSync`) avec limiteur de débit à 50 updates/s sur fenêtre glissante de 5s, notification `write_refused` immédiate sans déconnexion sauvage et suspension d'abus (15 minutes avec code 4403) après 5 infractions consécutives. Vérifié par `SC04b` (tests T1 à T4).
-- **Historique & Restauration (F05)** : Visualisation des instantanés S3 et restauration sans altération de l'arbre historique postérieur ni consommation de quota journalier (`billedChars = 0`, limite de 10 restaurations/heure). Vérifié par `SC06-history`.
-- **Supervision & Administration (F10)** : Tableau de bord `/admin` actualisé toutes les 5 secondes (documents ouverts, liens actifs, liste des rédacteurs suspendus pour abus avec action de déblocage immédiat). Vérifié par les tests d'administration et `SC04b`.
-- **Alerte E-mail Dernier Exemplaire (F11)** : Notification automatique adressée au créateur du lien dès que le dernier exemplaire est attribué (`issued == maxDownloads`), protégée contre les doublons par verrou d'état conditionnel (SES sur AWS / Mailpit en local). Vérifié par `SC05` et `sc06-notifications-and-scans`.
+Plateforme web de rédaction collaborative en temps réel et de diffusion de documents PDF à tirage limité pour association étudiante. L'infrastructure est conçue pour absorber d'intenses pics d'affluence sous des contraintes strictes de capacité et de quotas, avec une maîtrise rigoureuse des coûts sur AWS.
 
 ---
 
-## 2. Architecture Technique et Choix
+## Sommaire
 
-| Composant | Technologie | Justification |
+1. [Architecture Globale](#1-architecture-globale)
+2. [Garanties Métier et Invariants Formels](#2-garanties-métier-et-invariants-formels)
+3. [Index de la Documentation Technique](#3-index-de-la-documentation-technique)
+4. [Démarrage Rapide en Local](#4-démarrage-rapide-en-local)
+5. [Validation et Tests Automatisés](#5-validation-et-tests-automatisés)
+6. [Déploiement AWS et Exploitation](#6-déploiement-aws-et-exploitation)
+7. [Structure du Dépôt](#7-structure-du-dépôt)
+
+---
+
+## 1. Architecture Globale
+
+Le schéma ci-dessous illustre l'architecture complète du système, depuis le pipeline CI/CD jusqu'à la distribution aux utilisateurs via Amazon CloudFront, EC2, DynamoDB, S3 et les fonctions Serverless.
+
+<p align="center">
+  <img src="./docs/images/global%20architecture.png" alt="Architecture Globale AWS — Éditeur Collaboratif" width="100%" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" />
+</p>
+
+### Synthèse des Blocs Fonctionnels
+
+- **Distribution & Accès Edge** : Amazon CloudFront achemine le trafic HTTPS et WebSockets vers l'instance Amazon EC2. Un reverse-proxy Caddy sécurise les connexions et dispatche les flux vers l'application web Next.js (port 3000) et le serveur collaboratif Hocuspocus (port 1234).
+- **Édition Collaborative en Temps Réel** : Moteur CRDT décentralisé basé sur Yjs (`Y.Text`) et CodeMirror 6, géré par un serveur Hocuspocus sur instance unique EC2 (`t3.small`). Synchronisation synchrone par journalisation Write-Ahead Logging (WAL) dans DynamoDB garantissant zéro perte de caractère.
+- **Traitement Asynchrone & Serverless** : Gestion des tirages PDF par file Amazon SQS et fonctions AWS Lambda (génération PDF déterministe par hachage SHA-256, API de réservation et notifications SES).
+- **Stockage & Persistance** : Amazon DynamoDB (transactions atomiques ACID pour les quotas et réservations) et Amazon S3 (instantanés de texte et PDFs horodatés immuables).
+- **CI/CD & Exploitation** : Déploiement d'infrastructure via Terraform, conteneurs légers hébergés sur Amazon ECR, exploitation sécurisée sans port SSH ouvert via AWS Systems Manager (SSM), et métriques centralisées sur Amazon CloudWatch.
+
+---
+
+## 2. Garanties Métier et Invariants Formels
+
+Le système garantit par construction quatre invariants fondamentaux et des mécanismes de protection robustes :
+
+| Invariant / Mécanisme | Description | Garantie Formelle & Validation |
 | :--- | :--- | :--- |
-| **Frontend & UI** | Next.js 16 (App Router), React 19, Tailwind CSS v4 | Rendu serveur hybride, performance et ergonomie réactive |
-| **Éditeur de texte** | CodeMirror 6 + `y-codemirror.next` + Yjs | Éditeur modulaire léger avec présence et curseurs distants |
-| **Serveur de collaboration** | Hocuspocus 4.7.1 (Node.js 22, instance unique) | Évite la complexité de Redis et du clustering multi-instances (D-02) |
-| **Base de données** | Amazon DynamoDB (12 tables `PAY_PER_REQUEST`) | Latence milliseconde, transactions atomiques, TTL et Streams |
-| **Stockage Objets** | Amazon S3 (Privé, SSE-S3, TLS forcé) | Stockage immuable des textes, instantanés et PDF pré-signés |
-| **Files asynchrones** | Amazon SQS (`pdf-jobs` + `pdf-jobs-dlq`) | Traitement robuste du rendu PDF avec politique de réessai et DLQ |
-| **E-mails / Alertes** | Amazon SES (sur AWS) / Mailpit (en local) | Envoi d'alertes lors de l'épuisement du dernier exemplaire (F11) |
-| **Infrastructure as Code** | Terraform >= 1.10 (Backend S3 avec verrou natif) | Déploiement reproductible, least-privilege strict, budget 10 $ |
+| **C1 — Capacité de Tirage** | Limitation stricte du nombre d'exemplaires émis ($0 \le \text{URL émis} \le N$). | Transaction atomique DynamoDB `TransactWriteItems`, fast-path mémoire vive anti-pic. Éprouvé sous 15 000 requêtes concurrentes (`SC02`, `SC02b`). |
+| **C2 — Convergence CRDT** | Édition simultanée sans conflit entre plusieurs centaines de rédacteurs. | Document `Y.Text` brut, Write-Ahead Logging DynamoDB avant diffusion aux pairs. Validé sous 89 100 propagations concurrentes (`SC01`, `SC01b`). |
+| **C3 — Rendu PDF Single-Flight** | Identifiant de version déterministe par hachage SHA-256 UTF-8. | Traitement SQS asynchrone avec verrou single-flight anti-recalcul et remboursement automatique en cas d'échec (`c04-pdf-isolation`, `SC03`). |
+| **C4 — Quotas & Anti-Abus** | Quota journalier de 10 000 caractères UTF-16 par rédacteur (remis à zéro à 00:00 UTC). | Déduplication par `IntervalSet` (0 caractère refacturé). Limiteur de rafale à 50 updates/s et suspension temporaire d'abus (`SC04`, `SC04b`). |
+| **F05 — Historique & Restauration** | Visualisation et restauration de versions antérieures sans altérer l'arbre historique. | Instantanés S3 immuables, restauration sans impact sur le quota journalier (`billedChars = 0`, limite 10/heure, `SC06-history`). |
+| **F10 — Administration** | Supervision des sessions ouvertes, des liens de tirage et levée manuelle de suspension. | Tableau de bord `/admin` temps réel (rafraîchissement 5s) protégé par token secret. |
+| **F11 — Alerte Dernier Exemplaire** | Notification par e-mail au créateur dès l'émission du dernier exemplaire disponible. | Détection idempotente sur événement DynamoDB, acheminée via Amazon SES en production et Mailpit en local (`SC05`). |
 
 ---
 
-## 3. Guide de Démarrage Rapide en Local
+## 3. Index de la Documentation Technique
 
-### 3.1 Prérequis
+Afin de préserver la clarté et la concision de ce README, la documentation technique détaillée est organisée par domaine d'expertise :
+
+| Document | Objet & Périmètre |
+| :--- | :--- |
+| [**Architecture & Choix Technologiques (`docs/CHOIX_TECHNIQUES.md`)**](./docs/CHOIX_TECHNIQUES.md) | Synthèse exhaustive des choix d'ingénierie (Next.js 16, React 19, Tailwind v4, CodeMirror 6, Hocuspocus, DynamoDB, S3, SQS, SES) et justification des options exclues. |
+| [**Scénarios Critiques & Preuves (`docs/SCENARIOS.md`)**](./docs/SCENARIOS.md) | Formalisation complète des scénarios SC01 à SC06 : déroulement étape par étape, concurrence, cas de panne et résultats des tests. |
+| [**Guide de Déploiement AWS (`docs/DEPLOIEMENT_AWS.md`)**](./docs/DEPLOIEMENT_AWS.md) | Guide pas à pas de mise en production : politique IAM boundary, création du backend S3, prise en main Terraform, ECR, SSM et destruction. |
+| [**Conception & Design System (`docs/DESIGN.md`)**](./docs/DESIGN.md) | Modèle de données DynamoDB, arbre CRDT, tokens de style Papier/Nuit, composant `Logo` vectoriel et preuves formelles des invariants. |
+| [**Registre des Décisions d'Architecture (`docs/DECISIONS.md`)**](./docs/DECISIONS.md) | Historique exhaustif et justification des 45 décisions d'architecture (ADR D-01 à D-45). |
+| [**Spécification d'API (`docs/API.md`)**](./docs/API.md) | Spécification complète des contrats HTTP, en-têtes, codes d'erreur et modèle OpenAPI ([`docs/openapi.yaml`](./docs/openapi.yaml)). |
+| [**Rapport de Validation & Charge (`docs/TEST_REPORT.md`)**](./docs/TEST_REPORT.md) | Rapport dynamique des tests unitaires, d'intégration, de charge en boucle ouverte (Artillery/custom) et smoke tests. |
+| [**Modélisation Budgétaire AWS (`docs/COST.md`)**](./docs/COST.md) | Analyse détaillée des coûts, dimensionnement sous l'AWS Free Tier et plafonnement budgétaire strict (< 10 $). |
+
+---
+
+## 4. Démarrage Rapide en Local
+
+### Prérequis
 - **Node.js** >= 22.0.0
 - **Docker** et **Docker Compose**
-- **Terraform** >= 1.10.0 (pour validation locale)
+- **Terraform** >= 1.10.0 *(uniquement pour la validation d'infrastructure)*
 
-### 3.2 Lancement en une seule commande
-Le projet fournit un orchestrateur automatisé configurant l'ensemble de la pile locale :
+### Lancement de l'Environnement Complet
+Une seule commande orchestre l'ensemble de la pile locale (conteneurs, initialisation des schémas et serveurs dev) :
+
 ```bash
-# 1. Installation des dépendances npm
+# 1. Installation des dépendances
 npm ci
 
-# 2. Démarrage des conteneurs locaux, initialisation des tables/buckets et serveurs dev
+# 2. Démarrage complet de l'infrastructure et de l'application
 npm run dev:all
 ```
 
-Cette commande exécute séquentiellement :
-1. `docker compose up -d` : Démarre DynamoDB Local (8000), MinIO (9000/9001), ElasticMQ (9324/9325) et Mailpit (1025/8025).
-2. `npm run local:init` : Crée les 12 tables DynamoDB avec index et TTL, initialise le bucket S3 local `editeur-local-data`, et configure les files SQS.
-3. `npm run dev` : Lance concurremment :
-   - Next.js (port 3000)
-   - Serveur WebSocket Hocuspocus (port 1234 public, 1235 interne)
-   - Worker / Poller SQS local (`scripts/local-sqs-poller.ts`)
-   - Réconciliateur local (`scripts/local-reconciler.ts`)
+Cette commande démarre :
+1. **Les conteneurs de services locaux** : DynamoDB Local (`:8000`), MinIO S3 (`:9000/:9001`), ElasticMQ SQS (`:9324/:9325`), et Mailpit (`:1025/:8025`).
+2. **L'initialisation automatique** : Création des 12 tables DynamoDB, des index secondaires, du bucket S3 local `editeur-local-data`, et des files SQS.
+3. **Les processus applicatifs** : Application Next.js (`:3000`), serveur WebSocket Hocuspocus (`:1234`), worker SQS et réconciliateur local.
 
-### 3.3 Points d'Accès Locaux
-- **Application Web & Éditeur** : [http://localhost:3000](http://localhost:3000)
-- **Tableau de Bord Admin** : [http://localhost:3000/admin](http://localhost:3000/admin) *(Token : `dev-admin-token-change-in-prod`)*
-- **Console MinIO (S3)** : [http://localhost:9001](http://localhost:9001) *(Identifiants : `minioadmin` / `minioadminpassword`)*
-- **Interface Mailpit (E-mails)** : [http://localhost:8025](http://localhost:8025)
-- **File SQS ElasticMQ** : [http://localhost:9325](http://localhost:9325)
+### Points d'Accès Locaux
+
+| Service | URL locale | Identifiants / Remarques |
+| :--- | :--- | :--- |
+| **Application Web & Éditeur** | [http://localhost:3000](http://localhost:3000) | Choix de session prédéfinie (Alice, Bob, Charlie) ou personnalisée |
+| **Tableau de Bord Admin** | [http://localhost:3000/admin](http://localhost:3000/admin) | Token par défaut : `dev-admin-token-change-in-prod` |
+| **Vitrine UI & Thèmes** | [http://localhost:3000/ui-kit](http://localhost:3000/ui-kit) | Showcase du logo, des tokens Papier/Nuit et des variantes de marque |
+| **Console MinIO (S3)** | [http://localhost:9001](http://localhost:9001) | Utilisateur : `minioadmin` / Mot de passe : `minioadminpassword` |
+| **Interface Mailpit (E-mails)** | [http://localhost:8025](http://localhost:8025) | Consultation des notifications et alertes de tirage |
+| **File SQS ElasticMQ** | [http://localhost:9325](http://localhost:9325) | File de tâches de rendu PDF asynchrone |
 
 ---
 
-## 4. Exécution des Suites de Tests et Validation
+## 5. Validation et Tests Automatisés
 
-L'exhaustivité des résultats de test est **générée dynamiquement** à partir des fichiers JSON bruts via `npm run report` et consignée dans [`docs/TEST_REPORT.md`](./docs/TEST_REPORT.md).
+Le projet intègre une suite d'assurance qualité validant les contrats, la sécurité et la robustesse :
 
 ```bash
-# Tests unitaires (contrat Terraform, contrat API, comptage UTF-16, IntervalSet, JWT)
-npm run test
+# Vérification du style de code et des règles React 19 / ESLint
+npm run lint
 
-# Tests d'intégration (permissions, isolation PDF, bundle Lambda Section 20)
-npm run test:integration
+# Contrôle strict du typage TypeScript
+npm run typecheck
 
-# Scénarios métier de bout en bout (SC01 à SC06 - scénarios critiques complets)
+# Tests unitaires (contrats Terraform, contrats API, IntervalSet, calcul UTF-16, marque)
+npm test
+
+# Tests de conformité UI (vérification de l'absence totale d'emojis / icônes Lucide)
+npm run check:ui
+
+# Scénarios métier de bout en bout (SC01 à SC06)
 npm run test:scenarios
 
-# Génération automatique du rapport formel TEST_REPORT.md
+# Génération dynamique du rapport de validation exhaustif
 npm run report
 
 # Tests de charge en boucle ouverte (C-08)
 npm run loadtest:download
 npm run loadtest:collab
 npm run loadtest:combined
-
-# Test de fumée (Smoke Test) de bout en bout
-npm run smoke
 ```
 
 ---
 
-## 5. Déploiement sur AWS (Infrastructure & Conteneurs)
+## 6. Déploiement AWS et Exploitation
 
-> [!IMPORTANT]
-> Pour un guide pas à pas exhaustif et ordonné du déploiement en production, consultez le document de référence [**`DEPLOIEMENT_AWS.md`**](../DEPLOIEMENT_AWS.md).
-> Conformément à la règle 0.8 du sujet, **aucune commande de déploiement réel n'a été exécutée automatiquement**. La configuration Terraform a été rédigée, formatée (`terraform fmt`) et validée avec succès (`terraform validate`).
+Consultez le guide complet de mise en production dans [**`docs/DEPLOIEMENT_AWS.md`**](./docs/DEPLOIEMENT_AWS.md).
 
-### 5.1 Préparation de Terraform
-1. Rendez-vous dans le répertoire `infra/terraform/` :
+### Résumé de la Procédure
+
+1. **Prérequis IAM & Backend S3** :
+   - Définition de la *Permissions Boundary* : `permissions_boundary_arn`.
+   - Création du bucket S3 d'état Terraform avec chiffrement et verrouillage natif S3.
+2. **Prise en main par Terraform** :
    ```bash
    cd infra/terraform
-   ```
-2. Créez votre fichier de backend S3 :
-   ```bash
-   cp backend.hcl.example backend.hcl
-   # Éditez bucket, key et region selon votre compte AWS
-   ```
-3. Créez vos variables de déploiement (y compris `permissions_boundary_arn`) :
-   ```bash
-   cp terraform.tfvars.example terraform.tfvars
-   # Configurez alert_email, ses_sender, permissions_boundary_arn, github_repo, etc.
-   ```
-4. Initialisez et validez :
-   ```bash
    terraform init -backend-config=backend.hcl
+   terraform validate
    terraform plan -out=tfplan
+   terraform apply tfplan
+   ```
+3. **Construction et Publication des Conteneurs vers ECR** :
+   ```bash
+   ./scripts/deploy/build-and-push.sh [AWS_REGION] [ECR_APP_URL] [ECR_COLLAB_URL]
+   ```
+4. **Mise à Jour Sécurisée de l'Instance EC2 via SSM (Sans port SSH)** :
+   ```bash
+   ./scripts/deploy/deploy-ec2.sh <TAG> [INSTANCE_ID] [AWS_REGION]
+   ```
+5. **Nettoyage Intégral des Ressources (Post-Évaluation)** :
+   ```bash
+   terraform destroy -auto-approve
    ```
 
-### 5.2 Déploiement des Images de Production
-Le script de build prépare les conteneurs légers et les pousse vers Amazon ECR :
-```bash
-./scripts/deploy/build-and-push.sh [AWS_REGION] [ECR_APP_URL] [ECR_COLLAB_URL]
-```
-
-### 5.3 Déploiement sur l'Instance EC2
-L'instance EC2 (Amazon Linux 2023) est gérée sans port SSH ouvert, exclusivement via AWS Systems Manager (SSM) :
-```bash
-./scripts/deploy/deploy-ec2.sh <TAG> [INSTANCE_ID] [AWS_REGION]
-```
-Le script contacte l'agent SSM, tire les nouvelles images ECR, exécute `docker compose up -d`, et effectue un contrôle de santé HTTP (`http://127.0.0.1:80/`) avant d'acquitter le déploiement.
-
-### 5.4 Test de Fumée de Production
-Pour valider l'ensemble des flux (session, création de doc, liens, téléchargement et intégrité PDF) :
-```bash
-npm run smoke -- --base-url https://<distributionId>.cloudfront.net
-```
-
-### 5.5 Retour Arrière (Rollback)
-- **Serveur EC2** : Redéployez instantanément un tag d'image antérieur :
-  ```bash
-  ./scripts/deploy/rollback-ec2.sh <PREVIOUS_TAG> [INSTANCE_ID] [AWS_REGION]
-  ```
-- **Fonctions Lambda** : Mettez à jour le code vers le package précédent via `aws lambda update-function-code`.
-
 ---
 
-## 6. Destruction Complète des Ressources (Clean-up)
-
-Pour garantir qu'aucun frais ne subsiste après l'évaluation :
-
-```bash
-cd infra/terraform
-
-# 1. Destruction de l'ensemble des ressources AWS
-terraform destroy -auto-approve
-
-# 2. Vérifications de propreté dans la console AWS :
-# - Aucun Elastic IP (EIP) non attaché
-# - Aucune instance EC2 en cours d'exécution
-# - Aucun volume EBS résiduel
-# - Tables DynamoDB et Bucket S3 supprimés (data_bucket_force_destroy = true)
-# - Dépôts ECR supprimés
-```
-
----
-
-## 7. Structure du Référentiel
+## 7. Structure du Dépôt
 
 ```text
-├── app/                  # Application Next.js 16 (App Router)
+├── app/                  # Application Next.js 16 (App Router, thèmes clair/sombre, UI responsive)
 │   ├── (public)/d/       # Page de téléchargement publique /d/[linkId]
-│   ├── admin/            # Page de supervision /admin
-│   ├── editor/           # Éditeur collaboratif temps réel /editor/[docId]
-│   └── api/              # Route Handlers Next.js (session, documents, dl, admin)
-├── collab/               # Serveur WebSocket Hocuspocus & protocoles CRDT
-├── deploy/               # Fichiers de conteneurisation et déploiement
-│   ├── Dockerfile.next   # Image production Next.js (standalone)
-│   ├── Dockerfile.collab # Image production Hocuspocus
-│   ├── Caddyfile         # Configuration reverse proxy port 80 (WebSockets)
-│   ├── docker-compose.prod.yml
-│   ├── bootstrap.sh      # User data EC2 (Amazon Linux 2023)
-│   └── update.sh         # Script de mise à jour à chaud via SSM
-├── dist/                 # Artefacts compilés (dist/lambdas/*.zip, dist/collab/server.js)
-├── docs/                 # Documentation d'architecture, API, rapports et coûts
+│   ├── admin/            # Console d'administration et déblocage /admin
+│   ├── editor/           # Éditeur collaboratif temps réel avec aperçu Overleaf /editor/[docId]
+│   ├── ui-kit/           # Vitrine de test des pistes de marque et tokens
+│   └── api/              # Route Handlers Next.js (session, documents, téléchargement, admin)
+├── collab/               # Serveur WebSocket Hocuspocus & protocoles CRDT Yjs
+├── deploy/               # Fichiers de conteneurisation Docker, Caddyfile et scripts EC2
+├── dist/                 # Artefacts compilés (lambdas zip, bundle collab)
+├── docs/                 # Documentation technique d'ingénierie et d'architecture
+│   ├── images/           # Diagrammes d'architecture (global architecture.png)
+│   ├── CHOIX_TECHNIQUES.md # Justification des choix technologiques et des exclusions
+│   ├── SCENARIOS.md      # Formalisation et validation des scénarios critiques SC01 à SC06
+│   ├── DEPLOIEMENT_AWS.md  # Guide complet de déploiement et d'exploitation AWS
+│   ├── DESIGN.md         # Architecture détaillée, design system, tokens et preuves
+│   ├── DECISIONS.md      # Registre des 45 décisions d'architecture (ADR)
 │   ├── API.md            # Spécification détaillée des endpoints
-│   ├── openapi.yaml      # Spécification OpenAPI 3.1.0 importable
-│   ├── DESIGN.md         # Architecture, modèles de données et preuves des invariants
-│   ├── TEST_REPORT.md    # Rapport des tests unitaires, scénarios et charge
-│   ├── COST.md           # Modélisation des coûts AWS et profils d'usage
-│   └── DECISIONS.md      # Journal de bord de toutes les décisions d'architecture
-├── infra/terraform/      # Infrastructure as Code AWS complète (17 fichiers)
-├── lambdas/              # Handlers des 5 fonctions Lambda du projet
-├── loadtest/             # Scripts de test de charge (download-burst, collab-sim)
-├── scripts/              # Scripts utilitaires, init locale, smoke test et déploiement
-└── tests/                # Suites de tests automatisés (unit, integration, scenarios)
+│   ├── openapi.yaml      # Spécification OpenAPI 3.0 importable
+│   ├── TEST_REPORT.md    # Rapport de validation et résultats de charge
+│   └── COST.md           # Modélisation des coûts AWS Free Tier (< 10 $)
+├── infra/terraform/      # Infrastructure as Code AWS complète (17 fichiers .tf modulaires)
+├── lambdas/              # Handlers des 5 fonctions AWS Lambda (PDF, API, Notifier, Reconciler, DLQ)
+├── loadtest/             # Scripts d'injection de charge en boucle ouverte (Artillery / custom)
+├── public/brand/         # Assets d'identité visuelle (logos SVG vectoriels, icônes PWA, images)
+├── scripts/              # Scripts utilitaires d'init locale, déploiement, checks et tests de fumée
+├── src/components/       # Composants React partagés (Logo, ThemeToggle, modales)
+└── tests/                # Suites de tests automatisés (unitaires, intégration, contrats)
 ```
