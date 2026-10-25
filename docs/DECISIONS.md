@@ -146,8 +146,137 @@ Statut : `figée` (ne pas remettre en cause sans raison forte), `proposée` (à 
 | 2026-10-24 | C-01 | Capture synchrone de `upToSeq` et `snapshotBytes` au même tick dans `persistDocumentSnapshot` | Évite qu'un `await` intermédiaire ne permette à des updates concurrents d'entrer dans `state.latestSeq` sans figurer dans le snapshot | Calculer `upToSeq` après les écritures S3 (bogue original) | Élimination de la course snapshot / journal |
 | 2026-10-24 | C-01 | Marge de sécurité `REPLAY_MARGIN` (défaut 200) pour le rejeu et la purge du journal | Défense en profondeur : rejouer un update Yjs est idempotent, en sauter un est fatal. Purge uniquement `seq <= upToSeq - REPLAY_MARGIN`. | Purge immédiate de `seq <= upToSeq` sans marge | Invariant C2 garanti même en cas d'anomalie transitoire |
 | 2026-10-24 | C-01 | Fallback de `getHead` sur `doc_snapshots` quand le journal est vide et aucun head n'existe | Empêche de renvoyer un document vierge si un document existant a eu son journal purgé après snapshot | Renvoyer un texte vide par défaut sans consulter `doc_snapshots` | Respect strict de C3 ("la dernière version acceptée") |
+| 2026-10-24 | C-04 | Isolation stricte du rendu PDF au seul `pdf-worker` (jamais de rendu dans `handleGetReservation` ni `persistDocumentSnapshot`) | Évite la saturation CPU sous pic sur l'API de téléchargement et le serveur collab ; garantit l'utilisation exclusive de la file SQS et de la concurrence contrôlée | Rendu synchrone de secours lors du polling (contournait SQS, DLQ et timeout) | Performance sous pic et respect strict de C3, I05 |
+| 2026-10-24 | C-04 | Découplage de `computeVersionId` dans `src/shared/pdf/version.ts` et exclusion de `pdfkit` du bundle `download-api` | `download-api` n'a pas besoin de `pdfkit` ni de DejaVu Sans ; bundle réduit de 3.27 Mo à 2.17 Mo (< 3 Mo) | Conserver `computeVersionId` dans `render.ts` (importait `pdfkit` par effet de bord) | Réduction taille de bundle Lambda et rapidité de cold-start |
+| 2026-10-24 | C-05 | Fonction unique idempotente `advanceReservation(res)` et capture des pannes transitoires | Permet la reprise immédiate des réservations orphelines (sans versionId) lors des retries ou du polling, sans double débit de copie (`issued` reste incrémenté de 1) et sans jamais renvoyer 500 au visiteur (réponse 202 `preparing`) | Laisser la réservation bloquée en `preparing` jusqu'au scan du reconciler (10 minutes d'attente pour le visiteur) | Résilience aux pannes transitoires, zéro réservation orpheline bloquée, respect strict de C1 |
+| 2026-10-25 | C-03 | Limiteur de débit par connexion dans `beforeSync` (fenêtre glissante 5s, seuil `RATE_MAX_UPDATES_PER_SEC * 5`) et cache mémoire 5s pour blocage en cours de session | Protection active contre les rafales d'updates et fermeture immédiate (4403) dès qu'un rédacteur est bloqué en cours de session | Vérification uniquement lors du handshake d'authentification (permettait à un rédacteur bloqué de continuer à écrire indéfiniment) | Respect strict de F09, C4 et protection anti-abus en temps réel |
+| 2026-10-25 | C-03 | Refus d'update par `connection.readOnly = true` et `write_refused` sans fermeture sauvage tant que le seuil d'abus n'est pas atteint | Permet de notifier le client en temps réel sans détruire la connexion sur un pic transitoire ; fermeture 4403 uniquement après `ABUSE_THRESHOLD` (5) abus | `throw Error` systématique qui fermait brutalement la connexion avec code 4400 au lieu de délivrer les notifications `write_refused` | Conformité au protocole de refus Section 7.4 et UX client |
+| 2026-10-25 | C-06 | Verrou conditionnel d'envoi (`SET #st = :sending, claimedAt = :now` sous condition `#st = :pending AND (attribute_not_exists(claimedAt) OR claimedAt < :staleCutoff)`) | Élimine les doublons d'e-mail lors des courses concurrentes entre `handleLinkChange` et le réconciliateur | Envoi direct SES sans réservation d'état intermédiaire (provoquait l'envoi de multiples e-mails pour le même lien) | Exactly-once logique, idempotence et zéro doublon d'e-mail |
+| 2026-10-25 | C-06 | Helper générique de scan paginé `scanAll<T>` bouclant sur `LastEvaluatedKey` pour tous les scans de tables DynamoDB | Empêche la troncature silencieuse au-delà de 1 Mo / 1000 items qui laissait des notifications bloquées, des jobs non relancés et des réservations orphelines non remboursées | Scans bruts sans pagination | Exhaustivité des réconciliations et remboursements DLQ |
+| 2026-10-25 | C-10 | Moindre privilège IAM, variable obligatoire `permissions_boundary_arn` sur les 8 rôles et durcissement IMDSv2 / logs | Conforme aux exigences de sécurité du sujet ("chaque composant n'a que les droits dont il a besoin"). Supprime les jokers superflus, resserre SES à l'identité, ECR aux 2 dépôts, journalisation conteneurs sous `awslogs` et impose IMDSv2 avec hop limit 2. | Maintenir `Resource = "*"` partout ou omettre les permissions boundaries | Respect strict du principe de moindre privilège et sécurité Cloud |
+| 2026-10-25 | C-11 | Analyse Checkov sur `infra/terraform`, conditionnement de `deploy.yml` sur succès de CI, concurrence et variables `vars.*` | Garantit que le déploiement ne peut être déclenché si la CI échoue, évite les collisions de déploiement, migre les identifiants publics vers `vars.*` et sécurise le rollback immédiat | Déploiement direct sans vérification de CI ou utilisation de secrets pour des identifiants non sensibles | Intégrité et reproductibilité du pipeline CI/CD |
+| 2026-10-25 | C-12 | Alignement strict de la documentation : correction des numéros de fonctionnalités (F05, F10, F11), remplacement des affirmations invérifiables, 7 limites documentées dans DESIGN.md et test de contrat API | Rétablit l'honnêteté technique et la rigueur d'ingénierie : aucune affirmation sans preuve ou fichier de résultat, alignement avec `DEPLOIEMENT_AWS.md`, validation des 6 états de téléchargement | Conserver des affirmations non prouvées ou des numéros de fonctionnalités erronés | Intégrité documentaire et conformité Section 12 |
 
-### 9.4 Extraits des sorties ROUGE avant correctifs (C-01, C-02)
+### 9.4 Extraits des sorties ROUGE avant correctifs (C-01 à C-12)
+
+#### C-11 : CI et Déploiement (Checkov, Gating CI, Variables Actions, Rollback)
+```text
+FAIL  tests/unit/ci-deploy-contract.test.ts > C-11 : Vérification du contrat CI et Déploiement > V1. ci.yml intègre Checkov sur infra/terraform et toutes les suites de tests
+AssertionError: expected '...' to contain 'bridgecrewio/checkov-action'
+
+FAIL  tests/unit/ci-deploy-contract.test.ts > C-11 : Vérification du contrat CI et Déploiement > V2. deploy.yml est conditionné au succès de la CI et définit la concurrence
+AssertionError: expected '...' to contain 'concurrency:'
+
+FAIL  tests/unit/ci-deploy-contract.test.ts > C-11 : Vérification du contrat CI et Déploiement > V3. deploy.yml utilise vars.* pour les identifiants non-secrets et ne contient aucune clé AWS
+AssertionError: expected '...' to contain 'vars.AWS_DEPLOY_ROLE_ARN'
+
+FAIL  tests/unit/ci-deploy-contract.test.ts > C-11 : Vérification du contrat CI et Déploiement > V4. Le smoke test et deploy.yml affichent la commande de retour arrière en cas d'échec
+AssertionError: expected '...' to contain 'rollback-ec2.sh'
+```
+
+#### Règles Checkov ignorées (Skip List) et Justifications d'Ingénierie (C-11)
+
+| Règle Checkov | Description | Justification d'architecture / Non-pertinence |
+| :--- | :--- | :--- |
+| `CKV_AWS_18` | S3 bucket access logging | Aucun bucket de logging d'accès dédié configuré afin de limiter les coûts fixes et la prolifération de buckets sur le compte AWS. |
+| `CKV_AWS_144` | S3 bucket cross-region replication | L'architecture retenue est strictement mono-région (`eu-north-1`) ; aucune réplication géographique n'est requise par le cahier des charges. |
+| `CKV_AWS_145` | S3 bucket KMS CMK | Le chiffrement standard côté serveur AES-256 (`SSE-S3`) avec clés gérées par AWS est actif par défaut sans surcoût par requête KMS. |
+| `CKV_AWS_21` | S3 bucket versioning | L'immuabilité des artefacts PDF et textes est assurée au niveau applicatif par nommage déterministe SHA-256 (`<docId>/<versionId>.pdf`). Le versioning S3 générerait des surcoûts d'espace inutiles. |
+| `CKV_AWS_116` | Lambda DLQ | Les Lambdas synchrones (`download-api`) et asynchrones gérées par DynamoDB Streams / EventBridge n'ont pas de DLQ directe ; seul `pdf-worker` traite une file SQS qui intègre déjà sa propre DLQ dédiée (`pdf-jobs-dlq`). |
+| `CKV_AWS_117` / `CKV_AWS_272` | Lambda code-signing | La signature cryptographique des packages Lambda n'est pas mise en œuvre pour ce projet d'évaluation académique. |
+| `CKV_AWS_173` | Lambda env vars KMS encryption | Les variables d'environnement des Lambdas ne contiennent aucun secret sensible ; les secrets d'administration sont centralisés dans AWS SSM Parameter Store. |
+| `CKV_AWS_135` | EC2 EBS-optimized | Les instances `t3.micro` / `t3.small` intègrent l'optimisation EBS par défaut. |
+| `CKV_AWS_68` | CloudFront WAF | Arbitrage budgétaire assumé (limite D-XX dans DESIGN.md) : AWS WAF facture 5 $/mois + 1 $/règle, incompatible avec le budget de 10 $/mois. Protection assurée par le rate-limiter applicatif. |
+| `CKV_AWS_86` | CloudFront access logging | Les journaux d'accès CloudFront vers S3 sont désactivés pour respecter l'enveloppe budgétaire. |
+| `CKV_AWS_66` | SQS KMS encryption | Les files SQS utilisent le chiffrement géré `SSE-SQS` activé par défaut. |
+| `CKV_AWS_27` | SQS DLQ for DLQ | La file `pdf-jobs-dlq` est la file de rebut terminale ; elle ne nécessite pas de DLQ de second niveau. |
+| `CKV_AWS_28` | DynamoDB PITR | La sauvegarde continue à un instant donné (PITR) génère des coûts horaires permanents ; désactivée sur l'environnement de développement. |
+| `CKV_AWS_119` | DynamoDB KMS CMK | Chiffrement par défaut au repos avec clés gérées AWS (sans surcoût KMS). |
+| `CKV_AWS_158` | CloudWatch Log Group KMS | Chiffrement standard CloudWatch actif sans clé KMS dédiée. |
+
+#### Tableau Avant / Après des permissions et configurations durcies (C-10)
+
+| Composant / Règle | Avant durcissement | Après durcissement | Justification / Conformité |
+| ----------------- | ------------------ | ------------------ | -------------------------- |
+| **Permissions Boundary** | Absente de tous les rôles IAM | `permissions_boundary = var.permissions_boundary_arn` sur les 8 rôles (`download_api`, `pdf_worker`, `pdf_dlq_handler`, `notifier`, `reconciler`, `ec2`, `github_deploy`, `github_plan`) | Empêche toute élévation de privilège non autorisée au-delà de la borne définie par l'organisation. |
+| **SES (`notifier`, `reconciler`)** | `Resource = "*"` sur `ses:SendEmail`, `ses:SendRawEmail` | `Resource = "arn:aws:ses:${local.region}:${local.account_id}:identity/${var.ses_sender}"` avec condition `StringEquals "ses:FromAddress" = var.ses_sender` | Interdit l'envoi d'e-mails sous d'autres identités ou adresses arbitraires. |
+| **ECR CI (`github_deploy`)** | `Resource = "*"` sur toutes les actions ECR | `ecr:GetAuthorizationToken` en `Resource = "*"` (obligatoire AWS IAM) ; `ecr:PutImage`, `InitiateLayerUpload`, etc. restreints à `[aws_ecr_repository.app.arn, aws_ecr_repository.collab.arn]` | Empêche la CI de pousser ou modifier des images dans d'autres dépôts du compte AWS. |
+| **ECR EC2 (`ec2_app`)** | `Resource = "*"` sur toutes les actions ECR | `ecr:GetAuthorizationToken` en `Resource = "*"` (obligatoire AWS IAM) ; `BatchGetImage`, `GetDownloadUrlForLayer`, etc. restreints aux deux dépôts applicatifs | Empêche l'instance EC2 de lire ou puller des images tierces du compte. |
+| **DynamoDB Streams (`notifier`)** | `dynamodb:ListStreams` ciblant `stream_arn` (incompatible AWS IAM) | Isolé avec `Resource = "*"` et commentaire explicatif justifiant la limitation de l'API AWS IAM | Conforme à la syntaxe stricte d'IAM pour les actions globales non adressables par ARN. |
+| **CloudWatch Logs EC2** | `/opt/app/*` avec `logs:CreateLogGroup`, `CreateLogStream`, `PutLogEvents` | Restreint à `/${var.project}/${var.environment}/app:*` et `/collab:*` ; droits limités à `logs:CreateLogStream` et `logs:PutLogEvents` | Conforme au contrat 10.1 et 10.5 ; la création des log groups (14j rétention) est déléguée à Terraform. |
+| **SSM Document (`github_deploy`)** | `arn:aws:ssm:${local.region}:*:document/AWS-RunShellScript` (avec joker de compte) | `arn:aws:ssm:${local.region}::document/AWS-RunShellScript` (sans joker de compte) | Supprime le joker de compte pour les documents système AWS gérés. |
+| **GitHub OIDC Trust** | Acceptait `ref:refs/heads/main` et joker `environment:*` | Restreint à `sub = "repo:${var.github_repo}:environment:${var.github_environment}"` et `aud = "sts.amazonaws.com"` | Seul un runner authentifié sur l'environnement cible exact de ce dépôt peut assumer le rôle. |
+| **EC2 IMDSv2** | Non spécifié (IMDSv1 autorisé par défaut, hop limit 1) | `http_tokens = "required"`, `http_put_response_hop_limit = 2`, `http_endpoint = "enabled"` | Bloque les attaques SSRF (IMDSv2) et permet aux conteneurs Docker en mode bridge de joindre le service (hop limit 2). |
+| **Conteneurs logs (`docker-compose.prod.yml`)** | Pilote par défaut `json-file` local (aucun log dans CloudWatch) | Pilote `awslogs` configuré vers `/${project}/${environment}/app` et `/collab` | Centralisation de la supervision dans CloudWatch logs avec rétention 14 jours. |
+| **CloudFront Price Class** | `PriceClass_100` codé en dur | Variable configurable `cloudfront_price_class` (défaut `"PriceClass_All"`) | Optimisation de la latence africaine (Yaoundé) avec switch économique disponible. |
+| **Sorties Terraform** | 7 sorties sans SSM ni logs | Ajout de `ssm_parameter_names` et `log_group_names` | Déploiement et orchestration automatisés reproductibles. |
+
+#### C-06 : Scans non paginés et notifications sans réservation (doublon d'e-mail)
+```text
+FAIL tests/unit/scan-all.test.ts
+TypeError: scanAll is not a function
+
+FAIL tests/scenarios/sc06-notifications-and-scans.test.ts > SC06 — Scans paginés et réservation conditionnelle de notification (C-06) > T2. 10 appels simultanés du notifier + 10 du reconciler sur la même notification : exactement 1 e-mail dans Mailpit
+AssertionError: expected 7 to be 1 // Object.is equality
+- Expected
++ Received
+- 1
++ 7
+ ❯ tests/scenarios/sc06-notifications-and-scans.test.ts:101:23
+    100|
+    101|     expect(data.total).toBe(1);
+       |                        ^
+
+FAIL tests/scenarios/sc06-notifications-and-scans.test.ts > SC06 — Scans paginés et réservation conditionnelle de notification (C-06) > T3. Réservation périmée (claimedAt ancien) reprise
+TypeError: sendLastCopyNotification is not a function
+```
+
+#### C-03 : Détection de rafale absente et blocage en cours de session
+```text
+FAIL  tests/scenarios/sc04b-burst-and-session-block.test.ts > SC04b — Détection de rafale et blocage en cours de session (C-03 / F09) > T1. Rafale : un client envoie 400 updates en 2s -> refus rate_limited, blocage pour abus, document = updates acceptés
+AssertionError: expected 0 to be greater than 0
+ ❯ tests/scenarios/sc04b-burst-and-session-block.test.ts:135:35
+    133|
+    134|     // Des refus rate_limited doivent avoir été émis
+    135|     expect(refusedReasons.length).toBeGreaterThan(0);
+       |                                   ^
+    136|     expect(refusedReasons).toContain("rate_limited");
+    137|
+
+FAIL  tests/scenarios/sc04b-burst-and-session-block.test.ts > SC04b — Détection de rafale et blocage en cours de session (C-03 / F09) > T2. Blocage en cours de session : rédacteur connecté et en écriture -> update valide suivant sur la MÊME connexion refusé ('blocked')
+AssertionError: expected false to be true // Object.is equality
+- Expected
++ Received
+- true
++ false
+ ❯ tests/scenarios/sc04b-burst-and-session-block.test.ts:202:65
+    200|
+    201|     // L'update doit être refusé avec reason "blocked" et la connexion fermée avec 4403
+    202|     expect(refusedMessages.some((m) => m.reason === "blocked")).toBe(true);
+```
+
+#### C-05 : Réservation orpheline et reprise (advanceReservation)
+```text
+FAIL  tests/integration/c05-advance-reservation.test.ts > C-05 — Réservation orpheline et reprise (advanceReservation) > T1. getHead échoue au premier appel : réponse 202 avec reservationId ; 2ème appel (même requestId) aboutit ; links.issued n'augmente que de 1
+Error: Injection panne transitoire getHead
+ ❯ tests/integration/c05-advance-reservation.test.ts:96:7
+
+FAIL  tests/integration/c05-advance-reservation.test.ts > C-05 — Réservation orpheline et reprise (advanceReservation) > T3. Deux advanceReservation concurrents sur la même réservation : un seul versionId écrit, une seule URL émise
+TypeError: advanceReservation is not a function
+ ❯ tests/integration/c05-advance-reservation.test.ts:299:7
+```
+
+#### C-04 : Rendu PDF hors du PDF-Worker (polling download-api et collab)
+```text
+FAIL  tests/integration/c04-pdf-isolation.test.ts > C-04 — Rendu PDF hors du PDF-Worker > T1. Poller SQS arrêté, réservation sans PDF : GET reservation renvoie 202 'preparing', renderPdfBuffer : 0 appel, job 'pending' existe
+AssertionError: expected "renderPdfBuffer" to be called +0 times, but got 1 times
+
+FAIL  tests/integration/c04-pdf-isolation.test.ts > C-04 — Rendu PDF hors du PDF-Worker > T2. Test de bundle : metafile sans pdfkit pour download-api et taille zip < 3 Mo
+AssertionError: expected true to be false // hasPdfKit was true in download-api bundle
+
+FAIL  tests/integration/c04-pdf-isolation.test.ts > C-04 — Rendu PDF hors du PDF-Worker > T3. Snapshot : espion sur renderPdfBuffer : 0 appel lors de persistDocumentSnapshot
+AssertionError: expected "renderPdfBuffer" to be called +0 times, but got 1 times
+```
 
 #### C-01 : Course entre snapshot et journal (perte d'updates concurrents)
 ```text
@@ -182,6 +311,30 @@ AssertionError: expected 4 to be 1 // Object.is equality
 FAIL  tests/scenarios/sc02b-no-url-reissue.test.ts > SC02b — Pas de réémission d'URL pré-signée après expiration (C-02 / C1) > T4. Table reservations : au plus UNE transition vers url_issued par réservation
 AssertionError: expected 'http://localhost:9000/...Date=20261024T214921Z...' to be 'http://localhost:9000/...Date=20261024T214922Z...'
 ```
+
+#### C-08 : Tests de charge en boucle ouverte et mesures de production
+```text
+FAIL  tests/unit/loadtest-open-loop.test.ts > Planification en boucle ouverte (Open Loop - C-08) > T1. Répartition 80% première minute / 20% 4 minutes suivantes
+Error: Cannot find module '../../loadtest/scheduler'
+ ❯ tests/unit/loadtest-open-loop.test.ts:4:33
+```
+- **Run 1 (600 visiteurs / 500 copies)** : `2026-10-25T01-13-09-504Z-download-burst.json`. Invariant C1 : 500/500 distinctes, 500 en DB, C6 -69 ms, 0 erreur 5xx, p95 6839 ms.
+- **Run 2 (15 000 visiteurs / 500 copies)** : `2026-10-25T01-14-35-006Z-download-burst.json`. 15 029 requêtes, C1 en base : 500/500, refus épuisement : 6 437, 0 5xx. Limite locale : saturation loopback réseau (8 070 erreurs réseau client).
+- **Run 3 (collab-sim 300 rédacteurs)** : `2026-10-25T01-16-19-012Z-collab-sim.json`. Invariant C2 strictement identique entre les 300 pairs, 89 100 propagations observées, CPU serveur mesuré via `/internal/health` : 7 795 ms (~64.6% d'un cœur), RSS 386 Mo, p95 2650 ms.
+- **Run 4 (Test combiné)** : `2026-10-25T01-17-03-793Z-combined.json`. 600 visiteurs + 50 rédacteurs simultanés. C1 validé (500 copies et 500 URLs distinctes), C2 validé (convergence stricte), zéro 5xx. p95 téléchargement 4152 ms, propagation collab 220 ms.
+
+#### C-09 : Rapport de test généré à partir des résultats bruts
+```text
+FAIL  tests/unit/gen-test-report.test.ts > C-09 : Génération automatique du rapport de tests (TEST_REPORT.md)
+Error: Cannot find module '../../scripts/gen-test-report'
+ ❯ tests/unit/gen-test-report.test.ts:4:1
+```
+- Script `scripts/gen-test-report.ts` et commande `npm run report`.
+- Génération automatisée de `docs/TEST_REPORT.md` à partir des sorties JSON de Vitest (`test-results/*.json`) et des exécutions de charge (`loadtest/results/*.json`).
+- Aucun chiffre saisi manuellement : 89 tests automatisés (37 unitaires, 15 intégration, 37 scénarios), 100% de succès.
+- Tableau "Mesuré / Non mesuré" obligatoire, preuves C1/C2, rapport d'erreurs réelles et limites locales conservées fidèlement.
+
+
 
 
 

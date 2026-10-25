@@ -1,0 +1,89 @@
+{
+  "timestamp": "2026-10-25T01:17:03.793Z",
+  "testName": "combined-loadtest",
+  "environment": {
+    "nodeVersion": "v24.21.0",
+    "osPlatform": "linux",
+    "osRelease": "7.0.0-38-generic",
+    "cpuModel": "Intel(R) Core(TM) Ultra 7 155U",
+    "cpuCores": 14,
+    "totalMemoryMb": 14668,
+    "mode": "production"
+  },
+  "config": {
+    "downloadVisitors": 600,
+    "downloadCopies": 500,
+    "collabWriters": 50,
+    "collabDocs": 2,
+    "timeScale": 10
+  },
+  "downloadBurst": {
+    "totalRequests": 612,
+    "totalVisitors": 600,
+    "distinctPresignedUrls": 500,
+    "dbIssuedCount": 500,
+    "grantedCount": 500,
+    "exhaustedCount": 100,
+    "failedCount": 0,
+    "expiredCount": 0,
+    "errors5xxCount": 0,
+    "networkErrorsCount": 0,
+    "unhandledCount": 0,
+    "c6LastGrantedToFirstExhaustedMs": 164,
+    "initialLatenciesMs": {
+      "min": 10,
+      "p50": 935,
+      "p90": 4063,
+      "p95": 4152,
+      "p99": 4765,
+      "max": 4826,
+      "mean": 1408.2
+    },
+    "totalJourneyLatenciesMs": {
+      "min": 10,
+      "p50": 940,
+      "p90": 4070,
+      "p95": 4160,
+      "p99": 4780,
+      "max": 4850,
+      "mean": 1415.5
+    },
+    "totalDurationSec": 29.8,
+    "throughputReqSec": 20.5
+  },
+  "collabSim": {
+    "totalWriters": 50,
+    "docCount": 2,
+    "typingBursts": 3,
+    "totalEditsSent": 150,
+    "totalPropagationsObserved": 3600,
+    "totalRefused": 0,
+    "latenciesMs": {
+      "min": 104,
+      "p50": 189,
+      "p90": 217,
+      "p95": 220,
+      "p99": 226,
+      "max": 233,
+      "mean": 183.2
+    },
+    "serverCpu": {
+      "userMs": 1075,
+      "systemMs": 67,
+      "totalMs": 1142,
+      "percentOfOneCore": 31.8
+    },
+    "serverMemoryMb": {
+      "rss": 396
+    },
+    "finalDocLengths": [1635, 1635],
+    "durationSec": 3.6
+  },
+  "invariants": {
+    "c1RespectStrict": true,
+    "c1DistinctUrlsMatchIssued": true,
+    "c2ConvergenceStrict": true,
+    "zeroErrors5xx": true,
+    "zeroUnhandledRequests": true
+  }
+}

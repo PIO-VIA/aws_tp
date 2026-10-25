@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { getDocClient } from "../aws/dynamodb";
 import { tableName, getConfig } from "../config";
 import { putObjectIfNotExist, getObjectBuffer } from "../aws/s3";
-import { computeVersionId } from "../pdf/render";
+import { computeVersionId } from "../pdf/version";
 import { log } from "../log";
 
 export interface DocHead {

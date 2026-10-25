@@ -1,0 +1,39 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 1,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 2,
+  "numPassedTests": 1,
+  "numFailedTests": 1,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "startTime": 1700000000200,
+  "success": false,
+  "testResults": [
+    {
+      "name": "/path/tests/integration/perm.test.ts",
+      "status": "failed",
+      "startTime": 1700000000200,
+      "endTime": 1700000000350,
+      "assertionResults": [
+        {
+          "ancestorTitles": ["Integration Suite"],
+          "fullName": "Integration Suite test ok",
+          "title": "test ok",
+          "status": "passed",
+          "duration": 50,
+          "failureMessages": []
+        },
+        {
+          "ancestorTitles": ["Integration Suite"],
+          "fullName": "Integration Suite test failure example",
+          "title": "test failure example",
+          "status": "failed",
+          "duration": 45,
+          "failureMessages": ["AssertionError: expected true to be false"]
+        }
+      ]
+    }
+  ]
+}

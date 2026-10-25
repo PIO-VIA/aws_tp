@@ -10,7 +10,7 @@
 import http from "http";
 import { Server, Connection } from "@hocuspocus/server";
 import * as Y from "yjs";
-import { PutCommand, QueryCommand, BatchWriteCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, QueryCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { randomBytes } from "crypto";
 import { getConfig, tableName } from "../src/shared/config";
 import { getDocClient } from "../src/shared/aws/dynamodb";
@@ -18,7 +18,7 @@ import { putObjectIfNotExist, putObject, getObjectBuffer } from "../src/shared/a
 import { verifyCollabToken, timingSafeCompare } from "../src/shared/auth/jwt";
 import { getWriter } from "../src/shared/auth/session";
 import { getDocumentPermission } from "../src/shared/docs/documents";
-import { computeVersionId, renderPdfBuffer } from "../src/shared/pdf/render";
+import { computeVersionId } from "../src/shared/pdf/version";
 import { IntervalSet } from "../src/shared/yjs/interval-set";
 import { parseAndValidateUpdate } from "../src/shared/yjs/message-parser";
 import { consumeQuota, recordAbuseEvent } from "../src/shared/quota/quota";
@@ -39,6 +39,21 @@ interface CollabContext {
   role: "owner" | "editor" | "viewer";
   isReadOnly: boolean;
 }
+
+interface ExtConnection extends Connection<CollabContext> {
+  readOnly: boolean;
+}
+
+// Cache mémoire du statut de blocage par rédacteur (TTL 5 s, Section C-03.b)
+import {
+  resetBlockedCache,
+  updateBlockedCache,
+  getWriterBlockedUntil,
+} from "../src/shared/quota/blocked-cache";
+export { resetBlockedCache, updateBlockedCache, getWriterBlockedUntil };
+
+// Limiteur de débit par connexion : fenêtre glissante de 5s (Section C-03.a)
+const connectionUpdateTimestamps = new WeakMap<object, number[]>();
 
 const docStates = new Map<string, DocState>();
 
@@ -102,23 +117,6 @@ export async function persistDocumentSnapshot(
 
   const textKey = `texts/${docId}/${versionId}.txt`;
   await putObjectIfNotExist(textKey, text, "text/plain; charset=utf-8");
-
-  // 2b. Génération proactive immédiate du PDF dans S3 (disponible instantanément pour les liens)
-  const pdfKey = `pdfs/${docId}/${versionId}.pdf`;
-  try {
-    const docRes = await docClient.send(
-      new GetCommand({
-        TableName: tableName("documents"),
-        Key: { docId },
-      }),
-    );
-    const title = (docRes.Item?.title as string) || "Document";
-    const pdfBuffer = await renderPdfBuffer(title, text, versionId);
-    await putObjectIfNotExist(pdfKey, pdfBuffer, "application/pdf");
-    log.info("collab.snapshot.pdf_prerendered", { docId, versionId });
-  } catch (pdfErr) {
-    log.warn("collab.snapshot.pdf_prerender_error", { docId, versionId, error: pdfErr });
-  }
 
   // 3. Enregistrement dans doc_snapshots
   await docClient.send(
@@ -381,7 +379,11 @@ export function createCollabServer(options?: CollabServerOptions): { server: Ser
       // 1. Taille maximale de l'update
       if (rawUpdate.byteLength > config.MAX_UPDATE_BYTES) {
         if (context) {
-          await recordAbuseEvent(context.writerId, "too_large");
+          const abuse = await recordAbuseEvent(context.writerId, "too_large");
+          if (abuse.blocked && abuse.blockedUntil) {
+            updateBlockedCache(context.writerId, abuse.blockedUntil);
+            context.isReadOnly = true;
+          }
         }
         connection?.sendStateless(
           JSON.stringify({
@@ -396,7 +398,11 @@ export function createCollabServer(options?: CollabServerOptions): { server: Ser
       const parseResult = parseAndValidateUpdate(rawUpdate, state.intervalSet, false);
       if (!parseResult.valid) {
         if (context) {
-          await recordAbuseEvent(context.writerId, "invalid_update");
+          const abuse = await recordAbuseEvent(context.writerId, "invalid_update");
+          if (abuse.blocked && abuse.blockedUntil) {
+            updateBlockedCache(context.writerId, abuse.blockedUntil);
+            context.isReadOnly = true;
+          }
         }
         connection?.sendStateless(
           JSON.stringify({
@@ -413,7 +419,35 @@ export function createCollabServer(options?: CollabServerOptions): { server: Ser
         return;
       }
 
-      // 3. Rôle lecture seule ou rédacteur bloqué => refus direct de toute écriture réelle (Section 7.3.1)
+      const extConn = connection as ExtConnection | undefined;
+
+      // 3. Contrôle du blocage à chaque update d'écriture avec cache mémoire de 5 s (C-03.b)
+      if (context) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const blockedUntil = await getWriterBlockedUntil(context.writerId);
+        if (blockedUntil && blockedUntil > nowSec) {
+          context.isReadOnly = true;
+          if (extConn) extConn.readOnly = true;
+          connection?.sendStateless(
+            JSON.stringify({
+              type: "write_refused",
+              reason: "blocked",
+              blockedUntil,
+            }),
+          );
+          try {
+            extConn?.webSocket?.close(4403, "Compte bloqué pour abus");
+            connection?.close({ code: 4403, reason: "Compte bloqué pour abus" });
+          } catch {
+            // Ignorer si déjà fermée
+          }
+          const blockedErr = new Error("blocked");
+          Object.assign(blockedErr, { code: 4403, reason: "Compte bloqué pour abus" });
+          throw blockedErr;
+        }
+      }
+
+      // 4. Rôle lecture seule => refus direct de toute écriture réelle (Section 7.3.1)
       if (context?.isReadOnly) {
         connection?.sendStateless(
           JSON.stringify({
@@ -424,11 +458,70 @@ export function createCollabServer(options?: CollabServerOptions): { server: Ser
         throw new Error("read_only");
       }
 
-      // 4. Facturation atomique du crédit si n > 0 nouvelles unités UTF-16
+      // 5. Limiteur de débit par connexion : fenêtre glissante de 5 s (C-03.a)
+      if (connection) {
+        if (!context?.isReadOnly && extConn) {
+          extConn.readOnly = false;
+        }
+
+        const nowMs = Date.now();
+        const windowMs = 5000;
+        const maxUpdates = config.RATE_MAX_UPDATES_PER_SEC * 5;
+
+        let timestamps = connectionUpdateTimestamps.get(connection) || [];
+        timestamps = timestamps.filter((t) => nowMs - t < windowMs);
+
+        if (timestamps.length >= maxUpdates) {
+          let blockedUntil: number | undefined;
+          if (context) {
+            const abuse = await recordAbuseEvent(context.writerId, "rate_exceeded");
+            if (abuse.blocked && abuse.blockedUntil) {
+              blockedUntil = abuse.blockedUntil;
+              updateBlockedCache(context.writerId, abuse.blockedUntil);
+              context.isReadOnly = true;
+            }
+          }
+
+          connection.sendStateless(
+            JSON.stringify({
+              type: "write_refused",
+              reason: "rate_limited",
+              blockedUntil,
+            }),
+          );
+
+          if (extConn) extConn.readOnly = true;
+
+          if (blockedUntil) {
+            try {
+              extConn?.webSocket?.close(4403, "Compte bloqué pour abus");
+              connection.close({ code: 4403, reason: "Compte bloqué pour abus" });
+            } catch {
+              // Ignorer si déjà fermée
+            }
+            const rateBlockErr = new Error("blocked");
+            Object.assign(rateBlockErr, { code: 4403, reason: "Compte bloqué pour abus" });
+            throw rateBlockErr;
+          }
+
+          // L'update est refusé (non appliqué grâce à connection.readOnly = true)
+          // sans fermer la connexion tant que le seuil d'abus n'est pas atteint
+          return;
+        }
+
+        timestamps.push(nowMs);
+        connectionUpdateTimestamps.set(connection, timestamps);
+      }
+
+      // 6. Facturation atomique du crédit si n > 0 nouvelles unités UTF-16
       if (parseResult.newChars > 0 && context) {
         const quotaRes = await consumeQuota(context.writerId, parseResult.newChars);
         if (!quotaRes.granted) {
-          await recordAbuseEvent(context.writerId, "quota_refused");
+          const abuse = await recordAbuseEvent(context.writerId, "quota_refused");
+          if (abuse.blocked && abuse.blockedUntil) {
+            updateBlockedCache(context.writerId, abuse.blockedUntil);
+            context.isReadOnly = true;
+          }
           connection?.sendStateless(
             JSON.stringify({
               type: "write_refused",
@@ -440,6 +533,11 @@ export function createCollabServer(options?: CollabServerOptions): { server: Ser
           // Fermeture 4403 par Section 7.4
           const quotaErr = new Error("quota_refused");
           Object.assign(quotaErr, { code: 4403, reason: "Quota quotidien dépassé" });
+          try {
+            connection?.close({ code: 4403, reason: "Quota quotidien dépassé" });
+          } catch {
+            // Ignorer si déjà fermée
+          }
           throw quotaErr;
         }
       }
@@ -531,8 +629,27 @@ export function createCollabServer(options?: CollabServerOptions): { server: Ser
     const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
 
     if (req.method === "GET" && url.pathname === "/internal/health") {
+      const internalToken = req.headers["x-internal-token"];
+      const isAuth = internalToken && timingSafeCompare(String(internalToken), config.INTERNAL_TOKEN);
+
+      const cpu = process.cpuUsage();
+      const mem = process.memoryUsage();
+      let connections = 0;
+      for (const doc of server.hocuspocus.documents.values()) {
+        connections += doc.getConnectionsCount();
+      }
+
+      const resBody: Record<string, unknown> = { status: "ok" };
+      if (isAuth) {
+        resBody.stats = {
+          cpuUserMs: Math.round(cpu.user / 1000),
+          cpuSystemMs: Math.round(cpu.system / 1000),
+          rssMb: Math.round(mem.rss / (1024 * 1024)),
+          connections,
+        };
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok" }));
+      res.end(JSON.stringify(resBody));
       return;
     }
 

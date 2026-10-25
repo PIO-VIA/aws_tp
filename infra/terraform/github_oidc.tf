@@ -13,8 +13,9 @@ resource "aws_iam_openid_connect_provider" "github" {
 
 # 1. Rôle de déploiement CI/CD (branche main / environnements)
 resource "aws_iam_role" "github_deploy" {
-  count = var.enable_github_oidc ? 1 : 0
-  name  = "${local.name_prefix}-github-deploy-role"
+  count                = var.enable_github_oidc ? 1 : 0
+  name                 = "${local.name_prefix}-github-deploy-role"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -28,12 +29,7 @@ resource "aws_iam_role" "github_deploy" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          }
-          StringLike = {
-            "token.actions.githubusercontent.com:sub" = [
-              "repo:${var.github_repo}:ref:refs/heads/main",
-              "repo:${var.github_repo}:environment:*"
-            ]
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:environment:${var.github_environment}"
           }
         }
       }
@@ -49,10 +45,18 @@ resource "aws_iam_policy" "github_deploy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ECRAuthAndPush"
+        # ecr:GetAuthorizationToken ne supporte pas de ressource specifique selon la documentation IAM AWS (Resource = "*")
+        Sid    = "ECRAuth"
         Effect = "Allow"
         Action = [
-          "ecr:GetAuthorizationToken",
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPush"
+        Effect = "Allow"
+        Action = [
           "ecr:BatchCheckLayerAvailability",
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
@@ -61,7 +65,10 @@ resource "aws_iam_policy" "github_deploy" {
           "ecr:UploadLayerPart",
           "ecr:CompleteLayerUpload"
         ]
-        Resource = "*"
+        Resource = [
+          aws_ecr_repository.app.arn,
+          aws_ecr_repository.collab.arn
+        ]
       },
       {
         Sid    = "SSMDeployCommand"
@@ -72,7 +79,7 @@ resource "aws_iam_policy" "github_deploy" {
         ]
         Resource = [
           "arn:aws:ec2:${local.region}:${local.account_id}:instance/${aws_instance.server.id}",
-          "arn:aws:ssm:${local.region}:*:document/AWS-RunShellScript"
+          "arn:aws:ssm:${local.region}::document/AWS-RunShellScript"
         ]
       },
       {
@@ -96,8 +103,9 @@ resource "aws_iam_role_policy_attachment" "github_deploy" {
 
 # 2. Rôle en lecture seule pour 'terraform plan' (PRs)
 resource "aws_iam_role" "github_plan" {
-  count = var.enable_github_oidc ? 1 : 0
-  name  = "${local.name_prefix}-github-plan-role"
+  count                = var.enable_github_oidc ? 1 : 0
+  name                 = "${local.name_prefix}-github-plan-role"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

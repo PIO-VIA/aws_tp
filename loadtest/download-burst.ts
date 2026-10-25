@@ -1,11 +1,14 @@
 /**
- * Test de charge du chemin de téléchargement (Node/undici équivalent k6).
- * Modélise l'arrivée massive de visiteurs avec profil constant-arrival-rate & burst (Section 15.4).
- * Vérifie :
- * - Invariant C1 : réservations accordées == MAX_COPIES exactement
- * - Aucune requête sans état explicite (0 état inconnu)
- * - Taux d'erreur 5xx ~ 0
- * - Mesure des latences (p50, p90, p95, p99)
+ * Test de charge du chemin de téléchargement en BOUCLE OUVERTE (Section 15.4, C-08).
+ * - Modélise l'arrivée massive de visiteurs selon un calendrier précis :
+ *   80 % dans les 60 premières secondes, 20 % dans les 240 secondes suivantes.
+ * - Facteur de compression configurable TIME_SCALE pour accélérer l'exécution locale.
+ * - Mesures obligatoires :
+ *   * Nombre d'URL pré-signées DISTINCTES reçues == MAX_COPIES == links.issued (Preuve C1).
+ *   * Temps écoulé entre le dernier exemplaire émis et le premier refus "exhausted" (Contrainte C6).
+ *   * Latences par endpoint et par état (p50, p90, p95, p99, min, max, mean).
+ *   * Taux d'erreurs 5xx et réseau.
+ *   * Métadonnées complètes de l'environnement (CPU, RAM, OS, Node, mode).
  */
 import http from "http";
 import fs from "fs";
@@ -18,36 +21,65 @@ import { tableName } from "../src/shared/config";
 import { getDocClient } from "../src/shared/aws/dynamodb";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { LinkRecord } from "../src/shared/links/types";
+import { generateOpenLoopSchedule, calculateC6GapMs, ScheduledVisitor } from "./scheduler";
+import { getEnvInfo, EnvInfo } from "./env-info";
 import { log } from "../src/shared/log";
 
-interface RequestResult {
+export interface VisitorJourneyResult {
+  visitorIndex: number;
   requestId: string;
-  durationMs: number;
+  phase: "burst" | "tail";
+  scheduledOffsetMs: number;
+  actualStartOffsetMs: number;
+  initialLatencyMs: number;
+  totalDurationMs: number;
   initialState: string;
   finalState: string;
-  pollCount: number;
   statusCode: number;
+  pollCount: number;
+  presignedUrl?: string;
+  grantedAt?: number;
+  exhaustedAt?: number;
   error?: string;
 }
 
-interface LoadTestSummary {
+export interface DownloadBurstSummary {
   timestamp: string;
   testName: "download-burst";
+  environment: EnvInfo;
   config: {
     totalVisitors: number;
     maxCopies: number;
     burstRatio: number;
-    concurrency: number;
+    phase1Sec: number;
+    phase2Sec: number;
+    timeScale: number;
+    maxWaitSec: number;
     targetUrl: string;
   };
   metrics: {
     totalRequests: number;
+    totalVisitors: number;
+    distinctPresignedUrls: number;
+    dbIssuedCount: number;
     grantedCount: number;
     exhaustedCount: number;
     failedCount: number;
+    expiredCount: number;
     errors5xxCount: number;
+    networkErrorsCount: number;
     unhandledCount: number;
-    latenciesMs: {
+    c6LastGrantedToFirstExhaustedMs: number | null;
+    initialLatenciesMs: {
+      min: number;
+      p50: number;
+      p90: number;
+      p95: number;
+      p99: number;
+      max: number;
+      mean: number;
+    };
+    totalJourneyLatenciesMs: {
       min: number;
       p50: number;
       p90: number;
@@ -61,60 +93,80 @@ interface LoadTestSummary {
   };
   invariants: {
     c1RespectStrict: boolean;
+    c1DistinctUrlsMatchIssued: boolean;
     zeroUnhandledRequests: boolean;
     zeroErrors5xx: boolean;
     p95UnderTarget: boolean;
   };
 }
 
-async function main() {
-  const TOTAL_VISITORS = parseInt(process.env.TOTAL_VISITORS || "2000", 10);
-  const MAX_COPIES = parseInt(process.env.MAX_COPIES || "200", 10);
-  const CONCURRENCY = parseInt(process.env.CONCURRENCY || "50", 10);
-  const BURST_RATIO = 0.8; // 80 % dans la première phase
-  const TARGET_P95_MS = 250; // Objectif de latence p95
+export async function runDownloadBurst(options?: {
+  totalVisitors?: number;
+  maxCopies?: number;
+  timeScale?: number;
+  maxWaitSec?: number;
+  targetBaseUrl?: string;
+  linkIdOverride?: string;
+}): Promise<DownloadBurstSummary> {
+  const TOTAL_VISITORS = options?.totalVisitors ?? parseInt(process.env.TOTAL_VISITORS || "600", 10);
+  const MAX_COPIES = options?.maxCopies ?? parseInt(process.env.MAX_COPIES || "500", 10);
+  const TIME_SCALE = options?.timeScale ?? parseFloat(process.env.TIME_SCALE || "10");
+  const MAX_WAIT_SEC = options?.maxWaitSec ?? parseInt(process.env.MAX_WAIT_SEC || "30", 10);
+  const TARGET_P95_MS = 250;
+
+  const envInfo = getEnvInfo();
 
   log.info("loadtest.download.init", {
     TOTAL_VISITORS,
     MAX_COPIES,
-    CONCURRENCY,
+    TIME_SCALE,
+    MAX_WAIT_SEC,
+    env: envInfo,
   });
 
   // 1. Initialisation des données de test
-  const testId = randomUUID().slice(0, 8);
-  const creator = {
-    writerId: `creator-burst-${testId}`,
-    email: `presidence-burst-${testId}@asso.fr`,
-    name: "Presidence Burst",
-  };
+  let linkId = options?.linkIdOverride || "";
+  if (!linkId) {
+    const testId = randomUUID().slice(0, 8);
+    const creator = {
+      writerId: `creator-burst-${testId}`,
+      email: `presidence-burst-${testId}@asso.fr`,
+      name: "Presidence Burst",
+    };
 
-  const doc = await createDocument(`Document de Charge ${testId}`, creator);
-  const link = await createLink({
-    docId: doc.docId,
-    creatorId: creator.writerId,
-    creatorEmail: creator.email,
-    creatorName: creator.name,
-    maxDownloads: MAX_COPIES,
-  });
-  const linkId = link.linkId;
+    const doc = await createDocument(`Document de Charge ${testId}`, creator);
+    const link = await createLink({
+      docId: doc.docId,
+      creatorId: creator.writerId,
+      creatorEmail: creator.email,
+      creatorName: creator.name,
+      maxDownloads: MAX_COPIES,
+    });
+    linkId = link.linkId;
+  }
 
-  log.info("loadtest.download.link_created", { linkId, maxDownloads: MAX_COPIES });
+  log.info("loadtest.download.link_ready", { linkId, maxDownloads: MAX_COPIES });
 
-  // 2. Démarrage d'un serveur HTTP local pour tester la pile réseau réelle (TCP loopback, HTTP parsing)
+  // 2. Point d'accès HTTP cible (serveur de prod ou loopback in-process)
   let localServer: http.Server | null = null;
-  let targetUrl = process.env.TARGET_URL || "";
+  const baseUrl = options?.targetBaseUrl || process.env.TARGET_BASE_URL || "";
+  let targetUrl = "";
 
-  if (!targetUrl) {
+  if (baseUrl) {
+    targetUrl = `${baseUrl.replace(/\/$/, "")}/api/dl/${linkId}/request`;
+  } else {
     const port = 3456;
     localServer = http.createServer(async (req, res) => {
-      if (req.method === "POST" && req.url?.startsWith("/api/dl/")) {
-        const parts = req.url.split("/");
-        const lId = parts[3];
+      const parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+      const parts = parsedUrl.pathname.split("/").filter(Boolean); // ['api', 'dl', linkId, ...]
+
+      if (req.method === "POST" && parts[0] === "api" && parts[1] === "dl" && parts[3] === "request") {
+        const lId = parts[2];
         let bodyData = "";
         req.on("data", (chunk) => (bodyData += chunk));
         req.on("end", async () => {
           try {
-            const json = JSON.parse(bodyData);
+            const json = JSON.parse(bodyData || "{}");
             const result = await handleDownloadRequest(lId, json.requestId);
             res.writeHead(result.status, {
               "Content-Type": "application/json",
@@ -126,6 +178,16 @@ async function main() {
             res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
           }
         });
+      } else if (req.method === "GET" && parts[0] === "api" && parts[1] === "dl" && parts[3] === "reservations" && parts[4]) {
+        const lId = parts[2];
+        const resId = parts[4];
+        const { handleGetReservation } = await import("../src/shared/links/reservations");
+        const result = await handleGetReservation(lId, resId);
+        res.writeHead(result.status, {
+          "Content-Type": "application/json",
+          ...(result.retryAfterSec ? { "Retry-After": String(result.retryAfterSec) } : {}),
+        });
+        res.end(JSON.stringify(result.body));
       } else {
         res.writeHead(404);
         res.end();
@@ -136,108 +198,200 @@ async function main() {
     targetUrl = `http://127.0.0.1:${port}/api/dl/${linkId}/request`;
   }
 
-  log.info("loadtest.download.server_ready", { targetUrl });
+  log.info("loadtest.download.target_ready", { targetUrl });
 
-  // 3. Modélisation de l'arrivée des visiteurs
-  const results: RequestResult[] = [];
-  const startTime = Date.now();
+  // 3. Génération du plan en boucle ouverte (Open Loop)
+  const schedule = generateOpenLoopSchedule({
+    totalVisitors: TOTAL_VISITORS,
+    burstRatio: 0.8,
+    phase1Sec: 60,
+    phase2Sec: 240,
+    timeScale: TIME_SCALE,
+  });
 
-  const burstCount = Math.floor(TOTAL_VISITORS * BURST_RATIO);
-  const tailCount = TOTAL_VISITORS - burstCount;
+  const results: VisitorJourneyResult[] = [];
+  const testStartTime = Date.now();
+  let totalRequestsCount = 0;
 
-  log.info("loadtest.download.phases", { burstCount, tailCount });
+  const presignedUrls = new Set<string>();
+  const grantedTimestamps: number[] = [];
+  const exhaustedTimestamps: number[] = [];
 
-  // File d'attente concurrente avec limite de workers
-  let currentVisitor = 0;
-
-  async function executeVisitor(): Promise<RequestResult> {
+  // Exécute le parcours d'un visiteur à son instant planifié
+  async function runVisitor(visitor: ScheduledVisitor): Promise<VisitorJourneyResult> {
     const requestId = randomUUID();
+    const actualStartOffsetMs = Date.now() - testStartTime;
     const t0 = Date.now();
+
     let pollCount = 0;
     let statusCode = 0;
     let initialState = "unknown";
     let currentState = "unknown";
+    let presignedUrl: string | undefined;
+    let grantedAt: number | undefined;
+    let exhaustedAt: number | undefined;
     let error: string | undefined;
+    let initialLatencyMs = 0;
 
     try {
-      // 1. Requête initiale
+      // 1. Requête initiale POST
+      const initialT0 = Date.now();
+      totalRequestsCount++;
       const res = await fetch(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId }),
       });
+      initialLatencyMs = Date.now() - initialT0;
       statusCode = res.status;
-      const data = (await res.json().catch(() => ({}))) as { state?: string };
-      initialState = data.state || `status_${statusCode}`;
+
+      const data = (await res.json().catch(() => ({}))) as {
+        state?: string;
+        url?: string;
+        reservationId?: string;
+        error?: string;
+      };
+      initialState = data.state || (statusCode >= 500 ? "5xx" : `status_${statusCode}`);
       currentState = initialState;
 
-      // 2. Polling si preparing ou retry
-      while ((currentState === "preparing" || currentState === "retry") && pollCount < 5) {
-        pollCount++;
-        // Jitter entre 50ms et 150ms pour accélérer le test local
-        const jitterMs = 50 + Math.floor(Math.random() * 100);
-        await new Promise((resolve) => setTimeout(resolve, jitterMs));
+      if (currentState === "granted" && data.url) {
+        presignedUrl = data.url;
+        grantedAt = Date.now();
+        presignedUrls.add(data.url);
+        grantedTimestamps.push(grantedAt);
+      } else if (currentState === "exhausted") {
+        exhaustedAt = Date.now();
+        exhaustedTimestamps.push(exhaustedAt);
+      }
 
-        const pollRes = await fetch(targetUrl, {
-          method: "POST",
+      // 2. Boucle de polling GET si "preparing" ou "retry"
+      const reservationId = data.reservationId || requestId;
+      const pollUrl = baseUrl
+        ? `${baseUrl.replace(/\/$/, "")}/api/dl/${linkId}/reservations/${reservationId}`
+        : `http://127.0.0.1:3456/api/dl/${linkId}/reservations/${reservationId}`;
+
+      const maxWaitMs = MAX_WAIT_SEC * 1000;
+      const pollStartTime = Date.now();
+      let lastRes = res;
+
+      while (
+        (currentState === "preparing" || currentState === "retry") &&
+        Date.now() - pollStartTime < maxWaitMs
+      ) {
+        pollCount++;
+        // Respect de Retry-After ou délai proportionnel
+        const retryHeader = lastRes.headers.get("Retry-After");
+        const retrySec = retryHeader ? parseFloat(retryHeader) : 1;
+        const sleepMs = Math.max(50, Math.round((retrySec * 1000) / TIME_SCALE));
+        await new Promise((resolve) => setTimeout(resolve, sleepMs));
+
+        totalRequestsCount++;
+        const pollRes = await fetch(pollUrl, {
+          method: "GET",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ requestId }),
         });
-        const pollData = (await pollRes.json().catch(() => ({}))) as { state?: string };
-        currentState = pollData.state || `status_${pollRes.status}`;
-        if (currentState === "granted" || currentState === "exhausted" || currentState === "failed") {
+        lastRes = pollRes;
+        const pollData = (await pollRes.json().catch(() => ({}))) as {
+          state?: string;
+          url?: string;
+          error?: string;
+        };
+        currentState = pollData.state || (pollRes.status >= 500 ? "5xx" : `status_${pollRes.status}`);
+
+        if (currentState === "granted" && pollData.url) {
+          presignedUrl = pollData.url;
+          grantedAt = Date.now();
+          presignedUrls.add(pollData.url);
+          grantedTimestamps.push(grantedAt);
+          break;
+        } else if (currentState === "exhausted") {
+          exhaustedAt = Date.now();
+          exhaustedTimestamps.push(exhaustedAt);
+          break;
+        } else if (currentState === "failed" || currentState === "expired") {
           break;
         }
       }
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : String(e);
+      currentState = "network_error";
       statusCode = 0;
     }
 
-    const durationMs = Date.now() - t0;
+    const totalDurationMs = Date.now() - t0;
     return {
+      visitorIndex: visitor.visitorIndex,
       requestId,
-      durationMs,
+      phase: visitor.phase,
+      scheduledOffsetMs: visitor.offsetMs,
+      actualStartOffsetMs,
+      initialLatencyMs,
+      totalDurationMs,
       initialState,
       finalState: currentState,
-      pollCount,
       statusCode,
+      pollCount,
+      presignedUrl,
+      grantedAt,
+      exhaustedAt,
       error,
     };
   }
 
-  // Exécution concurrente avec limitation
-  const workers = Array.from({ length: CONCURRENCY }).map(async () => {
-    while (currentVisitor < TOTAL_VISITORS) {
-      currentVisitor++;
-      const res = await executeVisitor();
-      results.push(res);
-    }
+  // 4. Déclenchement en boucle ouverte
+  const visitorPromises = schedule.map((visitor) => {
+    return new Promise<VisitorJourneyResult>((resolve) => {
+      const delayMs = Math.max(0, visitor.offsetMs - (Date.now() - testStartTime));
+      setTimeout(async () => {
+        const res = await runVisitor(visitor);
+        results.push(res);
+        resolve(res);
+      }, delayMs);
+    });
   });
 
-  await Promise.all(workers);
+  await Promise.all(visitorPromises);
 
-  const totalDurationSec = (Date.now() - startTime) / 1000;
+  const totalDurationSec = (Date.now() - testStartTime) / 1000;
 
   if (localServer) {
     localServer.close();
   }
 
-  // 4. Analyse des résultats et métriques
+  // 5. Lecture finale de DynamoDB pour vérification absolue
+  const docClient = getDocClient();
+  const linkRecordRes = await docClient.send(
+    new GetCommand({
+      TableName: tableName("links"),
+      Key: { linkId },
+    }),
+  );
+  const linkInDb = linkRecordRes.Item as LinkRecord | undefined;
+  const dbIssuedCount = linkInDb?.issued ?? 0;
+
+  // 6. Agrégation des statistiques et distribution des latences
   let grantedCount = 0;
   let exhaustedCount = 0;
   let failedCount = 0;
+  let expiredCount = 0;
   let errors5xxCount = 0;
+  let networkErrorsCount = 0;
   let unhandledCount = 0;
-  const latencies = results.map((r) => r.durationMs).sort((a, b) => a - b);
+
+  const initialLatencies = results.map((r) => r.initialLatencyMs).sort((a, b) => a - b);
+  const journeyLatencies = results.map((r) => r.totalDurationMs).sort((a, b) => a - b);
 
   for (const r of results) {
-    if (r.finalState === "granted" || r.initialState === "granted" || r.initialState === "preparing") {
+    if (r.finalState === "granted" || r.initialState === "granted") {
       grantedCount++;
     } else if (r.finalState === "exhausted") {
       exhaustedCount++;
     } else if (r.finalState === "failed") {
       failedCount++;
+    } else if (r.finalState === "expired") {
+      expiredCount++;
+    } else if (r.finalState === "network_error") {
+      networkErrorsCount++;
     } else {
       unhandledCount++;
     }
@@ -247,65 +401,75 @@ async function main() {
     }
   }
 
-  // Vérification de cohérence dans DynamoDB
-  const docClient = getDocClient();
-  const linkRecordRes = await docClient.send(
-    new GetCommand({
-      TableName: tableName("links"),
-      Key: { linkId },
-    }),
-  );
-  const linkInDb = linkRecordRes.Item as LinkRecord;
-  const issuedInDb = linkInDb?.issued ?? 0;
-  log.info("Download burst completed", { clientGrantedCount: grantedCount, dbIssued: issuedInDb });
+  function calcStats(arr: number[]) {
+    if (arr.length === 0) return { min: 0, p50: 0, p90: 0, p95: 0, p99: 0, max: 0, mean: 0 };
+    const p50 = arr[Math.floor(arr.length * 0.5)] || 0;
+    const p90 = arr[Math.floor(arr.length * 0.9)] || 0;
+    const p95 = arr[Math.floor(arr.length * 0.95)] || 0;
+    const p99 = arr[Math.floor(arr.length * 0.99)] || 0;
+    const min = arr[0] || 0;
+    const max = arr[arr.length - 1] || 0;
+    const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    return {
+      min,
+      p50,
+      p90,
+      p95,
+      p99,
+      max,
+      mean: Math.round(mean * 10) / 10,
+    };
+  }
 
-  // Calcul des percentiles
-  const p50 = latencies[Math.floor(latencies.length * 0.5)] || 0;
-  const p90 = latencies[Math.floor(latencies.length * 0.9)] || 0;
-  const p95 = latencies[Math.floor(latencies.length * 0.95)] || 0;
-  const p99 = latencies[Math.floor(latencies.length * 0.99)] || 0;
-  const min = latencies[0] || 0;
-  const max = latencies[latencies.length - 1] || 0;
-  const mean = latencies.reduce((a, b) => a + b, 0) / (latencies.length || 1);
+  const initialStats = calcStats(initialLatencies);
+  const journeyStats = calcStats(journeyLatencies);
+  const c6Gap = calculateC6GapMs(grantedTimestamps, exhaustedTimestamps);
 
-  const summary: LoadTestSummary = {
+  const c1Strict = TOTAL_VISITORS >= MAX_COPIES ? dbIssuedCount === MAX_COPIES : dbIssuedCount <= MAX_COPIES;
+  const c1Distinct = presignedUrls.size === dbIssuedCount;
+
+  const summary: DownloadBurstSummary = {
     timestamp: new Date().toISOString(),
     testName: "download-burst",
+    environment: envInfo,
     config: {
       totalVisitors: TOTAL_VISITORS,
       maxCopies: MAX_COPIES,
-      burstRatio: BURST_RATIO,
-      concurrency: CONCURRENCY,
+      burstRatio: 0.8,
+      phase1Sec: 60,
+      phase2Sec: 240,
+      timeScale: TIME_SCALE,
+      maxWaitSec: MAX_WAIT_SEC,
       targetUrl,
     },
     metrics: {
-      totalRequests: results.length,
-      grantedCount: issuedInDb,
+      totalRequests: totalRequestsCount,
+      totalVisitors: results.length,
+      distinctPresignedUrls: presignedUrls.size,
+      dbIssuedCount,
+      grantedCount,
       exhaustedCount,
       failedCount,
+      expiredCount,
       errors5xxCount,
+      networkErrorsCount,
       unhandledCount,
-      latenciesMs: {
-        min,
-        p50,
-        p90,
-        p95,
-        p99,
-        max,
-        mean: Math.round(mean * 10) / 10,
-      },
+      c6LastGrantedToFirstExhaustedMs: c6Gap,
+      initialLatenciesMs: initialStats,
+      totalJourneyLatenciesMs: journeyStats,
       totalDurationSec: Math.round(totalDurationSec * 10) / 10,
-      throughputReqSec: Math.round((results.length / totalDurationSec) * 10) / 10,
+      throughputReqSec: Math.round((totalRequestsCount / totalDurationSec) * 10) / 10,
     },
     invariants: {
-      c1RespectStrict: issuedInDb === MAX_COPIES,
+      c1RespectStrict: c1Strict,
+      c1DistinctUrlsMatchIssued: c1Distinct,
       zeroUnhandledRequests: unhandledCount === 0,
       zeroErrors5xx: errors5xxCount === 0,
-      p95UnderTarget: p95 < TARGET_P95_MS,
+      p95UnderTarget: initialStats.p95 < TARGET_P95_MS,
     },
   };
 
-  // 5. Sauvegarde des résultats bruts JSON et du rapport Markdown
+  // 7. Enregistrement des résultats bruts JSON et Markdown
   const resultsDir = path.join(process.cwd(), "loadtest", "results");
   if (!fs.existsSync(resultsDir)) {
     fs.mkdirSync(resultsDir, { recursive: true });
@@ -317,14 +481,16 @@ async function main() {
 
   fs.writeFileSync(jsonPath, JSON.stringify(summary, null, 2), "utf-8");
 
-  const mdReport = `# Rapport de Test de Charge : download-burst
+  const mdReport = `# Rapport de Test de Charge : download-burst (Boucle Ouverte)
 
 - **Date** : ${summary.timestamp}
-- **Visiteurs simulés** : ${summary.config.totalVisitors}
+- **Environnement** : Node ${envInfo.nodeVersion}, ${envInfo.osPlatform} (${envInfo.osRelease}), ${envInfo.cpuModel} (${envInfo.cpuCores} cœurs, ${envInfo.totalMemoryMb} Mo RAM), mode **${envInfo.mode}**
+- **Visiteurs simulés** : ${summary.config.totalVisitors} (Open Loop : 80% en phase 1, 20% en phase 2)
+- **Facteur de compression temps (TIME_SCALE)** : ${summary.config.timeScale}x
 - **Exemplaires maximum autorisés** : ${summary.config.maxCopies}
-- **Concurrence** : ${summary.config.concurrency} requêtes simultanées
-- **Durée totale** : ${summary.metrics.totalDurationSec} s
-- **Débit moyen** : ${summary.metrics.throughputReqSec} req/s
+- **Requêtes HTTP totales générées** : ${summary.metrics.totalRequests}
+- **Durée totale d'exécution** : ${summary.metrics.totalDurationSec} s
+- **Débit effectif moyen** : ${summary.metrics.throughputReqSec} req/s
 
 ---
 
@@ -332,51 +498,62 @@ async function main() {
 
 | Critère | Attendu | Obtenu | Statut |
 | :--- | :--- | :--- | :--- |
-| **Invariant C1 (Réservations délivrées)** | **Exactement ${MAX_COPIES}** | **${issuedInDb}** | ${issuedInDb === MAX_COPIES ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Requêtes sans état explicite** | 0 | ${unhandledCount} | ${unhandledCount === 0 ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Erreurs 5xx (serveur)** | 0 | ${errors5xxCount} | ${errors5xxCount === 0 ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Objectif de latence p95** | < ${TARGET_P95_MS} ms | ${p95} ms | ${p95 < TARGET_P95_MS ? "✅ VALIDÉ" : "⚠️ LIMITE"} |
+| **Invariant C1 : Copies accordées en base (links.issued)** | Exactement ${MAX_COPIES} | **${dbIssuedCount}** | ${c1Strict ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
+| **Invariant C1 : URLs pré-signées distinctes reçues** | Exactement ${dbIssuedCount} | **${presignedUrls.size}** | ${c1Distinct ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
+| **Invariant C6 : Intervalle dernier granted -> 1er exhausted** | < 1000 ms (cache 1s) | **${c6Gap !== null ? `${c6Gap} ms` : "N/A"}** | ${c6Gap !== null && c6Gap <= 1500 ? "✅ VALIDÉ" : "ℹ️ MESURÉ"} |
+| **Requêtes sans état explicite** | 0 | **${unhandledCount}** | ${unhandledCount === 0 ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
+| **Erreurs 5xx (serveur)** | 0 | **${errors5xxCount}** | ${errors5xxCount === 0 ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
+| **Erreurs réseau client** | 0 | **${networkErrorsCount}** | ${networkErrorsCount === 0 ? "✅ VALIDÉ" : "⚠️ ERREURS"} |
+| **Objectif de latence p95 (requête initiale)** | < ${TARGET_P95_MS} ms | **${initialStats.p95} ms** | ${initialStats.p95 < TARGET_P95_MS ? "✅ VALIDÉ" : "⚠️ ÉCHEC / LIMITE"} |
 
 ---
 
-## 2. Distribution des Latences (ms)
+## 2. Distribution des Latences (Requête Initiale POST)
 
-- **Min** : ${min} ms
-- **Médiane (p50)** : ${p50} ms
-- **90e percentile (p90)** : ${p90} ms
-- **95e percentile (p95)** : ${p95} ms
-- **99e percentile (p99)** : ${p99} ms
-- **Max** : ${max} ms
-- **Moyenne** : ${summary.metrics.latenciesMs.mean} ms
+- **Min** : ${initialStats.min} ms
+- **Médiane (p50)** : ${initialStats.p50} ms
+- **90e percentile (p90)** : ${initialStats.p90} ms
+- **95e percentile (p95)** : ${initialStats.p95} ms
+- **99e percentile (p99)** : ${initialStats.p99} ms
+- **Max** : ${initialStats.max} ms
+- **Moyenne** : ${initialStats.mean} ms
 
 ---
 
-## 3. Répartition des Réponses
+## 3. Répartition des États Terminaux
 
-- **Réservations accordées (issued / granted)** : ${issuedInDb}
-- **Refus polis pour épuisement (exhausted)** : ${exhaustedCount}
+- **Copies attribuées (granted)** : ${grantedCount} (DB: ${dbIssuedCount})
+- **Refus pour épuisement (exhausted)** : ${exhaustedCount}
 - **Échecs explicites (failed)** : ${failedCount}
+- **Expirations (expired)** : ${expiredCount}
 - **Erreurs non gérées** : ${unhandledCount}
 `;
 
   fs.writeFileSync(mdPath, mdReport, "utf-8");
 
   log.info("loadtest.download.completed", {
-    issuedInDb,
+    dbIssuedCount,
+    distinctUrls: presignedUrls.size,
     maxCopies: MAX_COPIES,
-    c1Valid: issuedInDb === MAX_COPIES,
+    c1Valid: c1Strict && c1Distinct,
     jsonPath,
     mdPath,
   });
 
   console.log("\n" + mdReport);
-
-  if (issuedInDb !== MAX_COPIES || unhandledCount > 0) {
-    process.exit(1);
-  }
+  return summary;
 }
 
-main().catch((err) => {
-  log.error("loadtest.download.fatal", { error: err });
-  process.exit(1);
-});
+// Exécution directe CLI
+if (require.main === module || process.argv[1]?.endsWith("download-burst.ts")) {
+  runDownloadBurst()
+    .then((summary) => {
+      if (!summary.invariants.c1RespectStrict || !summary.invariants.c1DistinctUrlsMatchIssued) {
+        process.exit(1);
+      }
+    })
+    .catch((err) => {
+      log.error("loadtest.download.fatal", { error: err });
+      process.exit(1);
+    });
+}

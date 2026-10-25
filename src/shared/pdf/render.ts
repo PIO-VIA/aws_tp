@@ -1,11 +1,7 @@
 import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
-import { createHash } from "crypto";
-
-export function computeVersionId(text: string): string {
-  return createHash("sha256").update(text, "utf-8").digest("hex");
-}
+export { computeVersionId } from "./version";
 
 let fontPathCache: string | null = null;
 function getFontPath(): string | null {

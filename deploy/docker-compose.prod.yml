@@ -25,6 +25,12 @@ services:
       - "3000"
     networks:
       - app-network
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-eu-north-1}
+        awslogs-group: ${LOG_GROUP_APP:-/editeur-collab/dev/app}
+        awslogs-create-group: "false"
 
   collab:
     image: ${ECR_COLLAB_URL:-editeur-collab}:${IMAGE_TAG:-latest}
@@ -40,6 +46,12 @@ services:
       - "1235"
     networks:
       - app-network
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-eu-north-1}
+        awslogs-group: ${LOG_GROUP_COLLAB:-/editeur-collab/dev/collab}
+        awslogs-create-group: "false"
 
 networks:
   app-network:

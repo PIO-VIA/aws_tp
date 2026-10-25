@@ -60,17 +60,26 @@ resource "aws_instance" "server" {
     encrypted             = true
   }
 
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+    http_endpoint               = "enabled"
+  }
+
   user_data = templatefile("${path.module}/../../deploy/bootstrap.sh", {
-    AWS_REGION     = var.aws_region
-    SSM_PREFIX     = "/${var.project}/${var.environment}/"
-    ECR_APP_URL    = aws_ecr_repository.app.repository_url
-    ECR_COLLAB_URL = aws_ecr_repository.collab.repository_url
-    DATA_BUCKET    = aws_s3_bucket.data.id
-    PDF_QUEUE_URL  = aws_sqs_queue.pdf_jobs.url
+    AWS_REGION       = var.aws_region
+    SSM_PREFIX       = "/${var.project}/${var.environment}/"
+    ECR_APP_URL      = aws_ecr_repository.app.repository_url
+    ECR_COLLAB_URL   = aws_ecr_repository.collab.repository_url
+    DATA_BUCKET      = aws_s3_bucket.data.id
+    PDF_QUEUE_URL    = aws_sqs_queue.pdf_jobs.url
+    LOG_GROUP_APP    = "/${var.project}/${var.environment}/app"
+    LOG_GROUP_COLLAB = "/${var.project}/${var.environment}/collab"
   })
 
   tags = {
-    Name = "${local.name_prefix}-server"
+    Name    = "${local.name_prefix}-server"
+    Project = var.project
   }
 }
 

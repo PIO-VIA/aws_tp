@@ -169,16 +169,56 @@ Cette propriété garantit que deux rendus d'un même contenu textuel produisent
 2. **Déduplication par IntervalSet** : Chaque transaction client est identifiée par `(clientID, clock, length)`. Si un client retransmet un update déjà reçu, le serveur détecte qu'aucun nouvel intervalle n'est couvert et facture 0 caractère.
 3. **Débit Atomique** : Le débit est effectué via `UpdateItem` sur `quota` avec la clé `writerId#YYYY-MM-DD UTC` sous condition `usedChars + delta <= 10000`. En cas de dépassement, le message `write_refused` est envoyé et le client passe en lecture seule.
 
+### 4.5 Sémantique de Notification du Dernier Exemplaire ("At-Least-Once")
+> **Énoncé** : Lorsque le dernier exemplaire d'un lien est distribué (`issued == maxDownloads`), exactement un e-mail d'alerte est adressé au créateur du lien.
+> Aucune notification en doublon n'est envoyée lors d'exécutions concurrentes du Notifier (DynamoDB Streams) et du Reconciler (EventBridge cron).
+
+**Preuve & Implémentation** :
+1. **Verrou Conditionnel d'Envoi** : L'envoi est centralisé dans la fonction `sendLastCopyNotification(linkId)` (`src/shared/notify/notifier.ts`). Avant tout appel à Amazon SES ou au serveur SMTP, un verrou atomique est réservé sur la table `notifications` :
+   ```text
+   UpdateItem Key: { linkId }
+   UpdateExpression: SET #st = :sending, claimedAt = :now
+   ConditionExpression: #st = :pending AND (attribute_not_exists(claimedAt) OR claimedAt < :staleCutoff)
+   ```
+   (où `staleCutoff = now - 120s`).
+   Si la condition échoue, la fonction s'interrompt immédiatement avec la raison `already_claimed_or_sent`.
+2. **Transition de Clôture** :
+   - En cas de succès SES/SMTP : `SET #st = :sent, sentAt = :now REMOVE claimedAt, lastError`.
+   - En cas d'échec SES/SMTP : `SET #st = :pending, attempts = attempts + 1, lastError = :err REMOVE claimedAt`. Si `attempts >= 5`, une alerte critique est émise et l'abandon est tracé.
+3. **Sémantique "At-Least-Once"** :
+   Un doublon d'e-mail ne peut survenir **que si et seulement si** le processus crash brutalement (panne matérielle, SIGKILL) dans la micro-seconde située entre l'envoi SES/SMTP réussi et la mise à jour DynamoDB `SET #st = :sent`. Dans ce cas résiduel, après expiration du verrou (`claimedAt < now - 120s`), le réconciliateur retentera l'envoi pour garantir la délivrance.
+4. **Scans Paginés Exhaustifs** : Tous les parcours de tables DynamoDB (`notifications`, `pdf_jobs`, `reservations`, `links`, `writers`) utilisent le helper `scanAll` bouclant systématiquement sur `LastEvaluatedKey`, éliminant toute troncature silencieuse au-delà de 1 Mo / 1000 items.
+
 ---
 
 ## 5. Limites Connues et Mesures d'Atténuation
 
-1. **Jeton porteur de l'URL pré-signée** :
-   - *Limite* : Une URL pré-signée S3 peut techniquement être partagée entre plusieurs personnes pendant sa durée de vie.
-   - *Atténuation* : La durée de validité est restreinte au minimum opérationnel strict (60 secondes par défaut).
-2. **Fenêtre de coalescence de version (HEAD_COALESCE_MS)** :
-   - *Limite* : Sous fort pic de frappe, deux téléchargements distants de quelques millisecondes peuvent recevoir deux versions consécutives très proches.
-   - *Atténuation* : Ce comportement respecte l'invariant C3 car chaque version est immuable et exacte à l'instant de la réservation.
-3. **Mode Sandbox SES sur compte AWS neuf** :
-   - *Limite* : Seuls les e-mails validés peuvent recevoir les alertes de saturation du dernier exemplaire.
-   - *Atténuation* : Variable Terraform `ses_recipients` dédiée pour pré-enregistrer les adresses de test.
+Le système arbitre explicitement entre simplicité opérationnelle, maîtrise stricte du budget mensuel (< 10 $/mois) et garanties formelles. Les limites suivantes sont assumées et documentées :
+
+1. **D-24 — Coalescence de version (`HEAD_COALESCE_MS = 1000`)** :
+   - *Limite* : Sous un pic d'éditions continues, le calcul de la tête de document (`getHead`) met en cache la version pendant 1 000 ms pour éviter de recalculer un SHA-256 complet à chaque milliseconde. Deux téléchargements distants de 100 ms peuvent donc recevoir la même version de tête bien que de nouvelles frappes aient été reçues entre-temps.
+   - *Atténuation* : Conforme à l'invariant C3 : chaque réservation fige une version exacte, immuable et cohérente à l'instant de la réservation. Aucun téléchargement n'est corrompu.
+
+2. **D-15 — Risque de surfacturation et décompte par horloge `(clientId, clock)`** :
+   - *Limite* : Si un client malveillant forge de nouveaux `clientId` artificiels à chaque frappe pour insérer des caractères, la déduplication par `IntervalSet` traite chaque paquet comme une nouvelle insertion.
+   - *Atténuation* : Le quota quotidien de 10 000 caractères UTF-16 est rattaché à l'identité du rédacteur (`writerId` authentifié par session JWT HttpOnly), pas au `clientId` éphémère. Dès que le quota de 10 000 caractères du rédacteur est atteint, toute écriture est rejetée indépendamment du `clientId`. De plus, la détection de rafale (C-03) bloque l'émetteur après 5 infractions.
+
+3. **URL pré-signée porteur de jeton pendant le TTL (D-04 / D-05)** :
+   - *Limite* : Une URL pré-signée S3 délivrée à un visiteur est un jeton porteur (*bearer token*) pendant sa durée de vie (60 secondes) : le visiteur peut techniquement la partager ou la télécharger plusieurs fois avant expiration.
+   - *Atténuation* : La durée de validité est fixée au minimum opérationnel (60 s). L'application n'émet strictement qu'une seule URL par réservation (`issued` ne s'incrémente qu'une fois) et refuse toute réémission après expiration (C-02).
+
+4. **Sémantique de notification "au moins une fois" (SES)** :
+   - *Limite* : Amazon SES ne fournit pas de primitive de déduplication "exactement-une-fois". Si le processus crash brutalement dans le laps de temps infinitésimal séparant l'envoi de l'e-mail par SES et la confirmation de l'écriture DynamoDB `status = "sent"`, le réconciliateur peut réexpédier un deuxième e-mail après expiration du verrou (120 s).
+   - *Atténuation* : Le verrou conditionnel (`status = "pending"` + `claimedAt`) élimine 100 % des courses normales entre le stream Notifier et le cron Reconciler. Le cas résiduel de doublon n'intervient qu'en cas de crash matériel non maîtrisé.
+
+5. **Scans DynamoDB périodiques du réconciliateur** :
+   - *Limite* : Le réconciliateur parcourt les tables `notifications`, `pdf_jobs` et `reservations` toutes les 5 minutes via `scanAll`. Sur une base contenant des millions d'enregistrements, ces scans consommeraient une capacité de lecture excessive.
+   - *Atténuation* : Adapté et dimensionné pour le volume de l'application (< 10 000 items). Les réservations disposent d'un TTL DynamoDB (24 h) nettoyant automatiquement les items expirés, et les scans sont paginés sans troncature.
+
+6. **Point de défaillance unique (SPOF) de l'instance collab unique** :
+   - *Limite* : Le serveur Hocuspocus tourne sur une seule instance EC2 (sans cluster multi-instances ni Redis Pub/Sub partagé, conformément à la décision D-02). Si l'instance EC2 tombe, la collaboration en temps réel est interrompue jusqu'au redémarrage du conteneur.
+   - *Atténuation* : L'état persistant est entièrement sécurisé en amont (Write-Ahead Log dans DynamoDB et snapshots dans S3). Aucun travail n'est perdu lors d'un redémarrage : Hocuspocus recharge le snapshot et rejoue le journal DynamoDB à l'initialisation.
+
+7. **Absence de pare-feu applicatif AWS WAF** :
+   - *Limite* : Aucun Web Application Firewall n'est configuré devant CloudFront (frais fixes minimaux de 5 $/mois + 1 $/règle incompatibles avec le plafond budgétaire de 10 $).
+   - *Atténuation* : La protection anti-abus est assurée au niveau applicatif (rate limiter 50 updates/s dans le serveur collab, détection d'abus, verrouillage mémoire 1s sur les liens épuisés, et validation Zod stricte sur chaque endpoint).

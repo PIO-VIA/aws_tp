@@ -4,8 +4,7 @@
  * - Rembourse atomiquement chaque réservation encore "reserved" associée à cette version.
  * - Ne rembourse JAMAIS les réservations passées à "url_issued".
  */
-import { ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { getDocClient } from "../aws/dynamodb";
+import { scanAll } from "../aws/dynamodb";
 import { tableName } from "../config";
 import { transitionPdfJob } from "./jobs";
 import { refundReservation } from "../links/refund";
@@ -30,26 +29,22 @@ export async function processPdfDlqMessage(
   await transitionPdfJob(docId, versionId, "pending", "failed", error);
   await transitionPdfJob(docId, versionId, "running", "failed", error);
 
-  // 2. Recherche des réservations "reserved" associées à cette version
-  const docClient = getDocClient();
+  // 2. Recherche des réservations "reserved" associées à cette version (scan paginé C-06)
   const resTable = tableName("reservations");
 
-  const scanRes = await docClient.send(
-    new ScanCommand({
-      TableName: resTable,
-      FilterExpression: "docId = :docId AND versionId = :vId AND #status = :reserved",
-      ExpressionAttributeNames: {
-        "#status": "status",
-      },
-      ExpressionAttributeValues: {
-        ":docId": docId,
-        ":vId": versionId,
-        ":reserved": "reserved",
-      },
-    }),
-  );
+  const items = await scanAll<ReservationRecord>({
+    TableName: resTable,
+    FilterExpression: "docId = :docId AND versionId = :vId AND #status = :reserved",
+    ExpressionAttributeNames: {
+      "#status": "status",
+    },
+    ExpressionAttributeValues: {
+      ":docId": docId,
+      ":vId": versionId,
+      ":reserved": "reserved",
+    },
+  });
 
-  const items = (scanRes.Items as ReservationRecord[]) ?? [];
   let refundedCount = 0;
 
   // 3. Remboursement atomique pour chaque réservation éligible

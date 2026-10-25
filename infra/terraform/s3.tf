@@ -1,10 +1,6 @@
-resource "random_id" "bucket_suffix" {
-  byte_length = 4
-}
-
 # Bucket de données principal
 resource "aws_s3_bucket" "data" {
-  bucket        = "${local.name_prefix}-data-${random_id.bucket_suffix.hex}"
+  bucket        = "${local.name_prefix}-data-${local.account_id}"
   force_destroy = var.data_bucket_force_destroy
 }
 

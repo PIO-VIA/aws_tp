@@ -19,7 +19,6 @@ import {
 import { getHead } from "../docs/head";
 import { headObject, getPresignedDownloadUrl } from "../aws/s3";
 import { createPdfJobIfNotExists, getPdfJob } from "../pdf/jobs";
-import { processPdfJob } from "../pdf/worker";
 import { sendPdfJob } from "../aws/sqs";
 import { handleLinkChange } from "../notify/notifier";
 import { refundReservation } from "./refund";
@@ -81,7 +80,17 @@ export async function handleDownloadRequest(
 
   if (existingRes.Item) {
     metric("DownloadRequests", 1, { state: "idempotent" });
-    return mapReservationToResponse(existingRes.Item as ReservationRecord);
+    try {
+      return await advanceReservation(existingRes.Item as ReservationRecord);
+    } catch (advanceErr) {
+      log.warn("reservation.idempotent_advance_failed", { linkId, requestId, error: advanceErr });
+      const retryMs = computeRetryAfterMs(1);
+      return {
+        status: 202,
+        body: { state: "preparing", reservationId: requestId, retryAfterMs: retryMs },
+        retryAfterSec: Math.ceil(retryMs / 1000),
+      };
+    }
   }
 
   // c. Chemin rapide "épuisé" (sans écriture dans DynamoDB)
@@ -171,7 +180,17 @@ export async function handleDownloadRequest(
             }),
           );
           if (doubleRes.Item) {
-            return mapReservationToResponse(doubleRes.Item as ReservationRecord);
+            try {
+              return await advanceReservation(doubleRes.Item as ReservationRecord);
+            } catch (advanceErr) {
+              log.warn("reservation.idempotent_advance_failed", { linkId, requestId, error: advanceErr });
+              const retryMs = computeRetryAfterMs(1);
+              return {
+                status: 202,
+                body: { state: "preparing", reservationId: requestId, retryAfterMs: retryMs },
+                retryAfterSec: Math.ceil(retryMs / 1000),
+              };
+            }
           }
         }
         log.warn("reservation.tx_canceled", { linkId, requestId, reasons });
@@ -219,41 +238,116 @@ export async function handleDownloadRequest(
     }
   }
 
-  // e. Gagnant : sélection de version (getHead)
-  const head = await getHead(link.docId);
-  const versionId = head.versionId;
-  const selectedAt = Math.floor(Date.now() / 1000);
+  const initialRes: ReservationRecord = {
+    linkId,
+    reservationId: requestId,
+    status: "reserved",
+    docId: link.docId,
+    createdAt: nowSec,
+    ttl: nowSec + 86400 * 7,
+  };
 
-  // Mettre à jour la réservation avec la version sélectionnée
-  await docClient.send(
-    new UpdateCommand({
-      TableName: resTable,
-      Key: { linkId, reservationId: requestId },
-      UpdateExpression: "SET versionId = :v, selectedAt = :s",
-      ExpressionAttributeValues: { ":v": versionId, ":s": selectedAt },
-    }),
-  );
+  try {
+    return await advanceReservation(initialRes);
+  } catch (advanceErr) {
+    log.warn("reservation.advance_failed", { linkId, requestId, error: advanceErr });
+    const retryMs = computeRetryAfterMs(1);
+    const retrySec = Math.max(1, Math.ceil(retryMs / 1000));
+    return {
+      status: 202,
+      body: {
+        state: "preparing",
+        reservationId: requestId,
+        retryAfterMs: retryMs,
+      },
+      retryAfterSec: retrySec,
+    };
+  }
+}
 
-  // f. Si le PDF existe dans S3
-  const pdfKey = `pdfs/${link.docId}/${versionId}.pdf`;
+/**
+ * Fonction unique et idempotente de reprise / avancement de réservation (C-05).
+ * Appelée par POST request (après réservation atomique ET en cas de doublon/idempotence)
+ * et par GET reservation (polling).
+ */
+export async function advanceReservation(
+  initialRes: ReservationRecord,
+): Promise<{ status: number; body: DlResponseState; retryAfterSec?: number }> {
+  let res = initialRes;
+  const docClient = getDocClient();
+  const resTable = tableName("reservations");
+  const config = getConfig();
+
+  // Si déjà terminée
+  if (res.status === "url_issued" || res.status === "cancelled") {
+    return mapReservationToResponse(res);
+  }
+
+  // 1. Pas de versionId : getHead(docId), puis UpdateItem SET versionId, selectedAt CONDITION attribute_not_exists(versionId)
+  if (!res.versionId) {
+    const head = await getHead(res.docId);
+    const versionId = head.versionId;
+    const selectedAt = Math.floor(Date.now() / 1000);
+
+    try {
+      await docClient.send(
+        new UpdateCommand({
+          TableName: resTable,
+          Key: { linkId: res.linkId, reservationId: res.reservationId },
+          UpdateExpression: "SET versionId = :v, selectedAt = :s",
+          ConditionExpression: "attribute_not_exists(versionId)",
+          ExpressionAttributeValues: { ":v": versionId, ":s": selectedAt },
+        }),
+      );
+      res = { ...res, versionId, selectedAt };
+    } catch (err: unknown) {
+      log.warn("advance.update_version_failed", { error: err });
+      // Si la condition échoue, relire : une autre exécution a gagné
+      const reRead = await docClient.send(
+        new GetCommand({
+          TableName: resTable,
+          Key: { linkId: res.linkId, reservationId: res.reservationId },
+          ConsistentRead: true,
+        }),
+      );
+      if (reRead.Item) {
+        res = reRead.Item as ReservationRecord;
+      }
+    }
+  }
+
+  if (res.status === "url_issued" || res.status === "cancelled") {
+    return mapReservationToResponse(res);
+  }
+
+  const versionId = res.versionId;
+  if (!versionId) {
+    const retryMs = computeRetryAfterMs(1);
+    return {
+      status: 202,
+      body: { state: "preparing", reservationId: res.reservationId, retryAfterMs: retryMs },
+      retryAfterSec: Math.ceil(retryMs / 1000),
+    };
+  }
+
+  // 2. Si PDF présent dans S3 : émettre l'URL (transition conditionnelle reserved -> url_issued)
+  const pdfKey = `pdfs/${res.docId}/${versionId}.pdf`;
   const pdfExists = await headObject(pdfKey);
 
-  const docSlug = slugify(link.docId);
-  const filename = `${docSlug}-${versionId.substring(0, 8)}.pdf`;
-
   if (pdfExists) {
+    const docSlug = slugify(res.docId);
+    const filename = `${docSlug}-${versionId.substring(0, 8)}-${res.reservationId.substring(0, 8)}.pdf`;
     const { url, expiresAtEpochSec } = await getPresignedDownloadUrl(
       pdfKey,
       filename,
       config.PRESIGN_TTL_SEC,
     );
 
-    // UpdateItem conditionnel pour passer à url_issued (D-04 : UNE seule URL émise par réservation)
     try {
       await docClient.send(
         new UpdateCommand({
           TableName: resTable,
-          Key: { linkId, reservationId: requestId },
+          Key: { linkId: res.linkId, reservationId: res.reservationId },
           UpdateExpression:
             "SET #status = :issued, #url = :u, urlExpiresAt = :exp, issuedAt = :iat, filename = :fn",
           ConditionExpression: "#status = :reserved",
@@ -276,7 +370,7 @@ export async function handleDownloadRequest(
           state: "granted",
           url,
           expiresAt: expiresAtEpochSec,
-          reservationId: requestId,
+          reservationId: res.reservationId,
           filename,
         },
       };
@@ -285,7 +379,7 @@ export async function handleDownloadRequest(
       const reRead = await docClient.send(
         new GetCommand({
           TableName: resTable,
-          Key: { linkId, reservationId: requestId },
+          Key: { linkId: res.linkId, reservationId: res.reservationId },
           ConsistentRead: true,
         }),
       );
@@ -295,15 +389,24 @@ export async function handleDownloadRequest(
     }
   }
 
-  // g. Sinon : garantir UNE génération par version (single-flight)
-  const jobResult = await createPdfJobIfNotExists(link.docId, versionId);
-  if (jobResult.created) {
-    // Seul le créateur du job publie le message SQS
-    try {
-      await sendPdfJob({ docId: link.docId, versionId });
-    } catch (sqsErr) {
-      log.error("sqs.publish_failed", { docId: link.docId, versionId, error: sqsErr });
-      // Le reconciler republiera (Section 10.2.h)
+  // 3. Si PDF absent :
+  // Vérifier si le job a échoué
+  const job = await getPdfJob(res.docId, versionId);
+  if (job?.status === "failed") {
+    await refundReservation(res.linkId, res.reservationId);
+    return { status: 200, body: { state: "failed" } };
+  }
+
+  // Si le job est absent, le créer (single-flight) et publier sur SQS
+  if (!job) {
+    const jobResult = await createPdfJobIfNotExists(res.docId, versionId);
+    if (jobResult.created) {
+      try {
+        await sendPdfJob({ docId: res.docId, versionId });
+      } catch (sqsErr) {
+        log.error("sqs.publish_failed", { docId: res.docId, versionId, error: sqsErr });
+        // Le reconciler republiera (Section 10.2.h)
+      }
     }
   }
 
@@ -314,7 +417,7 @@ export async function handleDownloadRequest(
     status: 202,
     body: {
       state: "preparing",
-      reservationId: requestId,
+      reservationId: res.reservationId,
       retryAfterMs: retryMs,
     },
     retryAfterSec: retrySec,
@@ -340,7 +443,6 @@ export async function handleGetReservation(
   const reservationId = resIdParse.data;
   const docClient = getDocClient();
   const resTable = tableName("reservations");
-  const config = getConfig();
 
   const resItem = await docClient.send(
     new GetCommand({
@@ -361,10 +463,12 @@ export async function handleGetReservation(
     return mapReservationToResponse(res);
   }
 
-  // status "reserved"
+  // status "reserved" : reprise / avancement idempotent (C-05)
   if (res.status === "reserved") {
-    const versionId = res.versionId;
-    if (!versionId) {
+    try {
+      return await advanceReservation(res);
+    } catch (advanceErr) {
+      log.warn("reservation.poll_advance_failed", { linkId, reservationId, error: advanceErr });
       const retryMs = computeRetryAfterMs(2);
       return {
         status: 202,
@@ -372,89 +476,6 @@ export async function handleGetReservation(
         retryAfterSec: Math.ceil(retryMs / 1000),
       };
     }
-
-    // Vérifier si le PDF est disponible (ou rendu synchrone immédiat)
-    const pdfKey = `pdfs/${res.docId}/${versionId}.pdf`;
-    let pdfExists = await headObject(pdfKey);
-
-    if (!pdfExists) {
-      try {
-        await processPdfJob({ docId: res.docId, versionId });
-        pdfExists = await headObject(pdfKey);
-      } catch (err) {
-        log.warn("reservation.poll_direct_render_fallback", { docId: res.docId, versionId, error: err });
-      }
-    }
-
-    if (pdfExists) {
-      const docSlug = slugify(res.docId);
-      const filename = `${docSlug}-${versionId.substring(0, 8)}.pdf`;
-      const { url, expiresAtEpochSec } = await getPresignedDownloadUrl(
-        pdfKey,
-        filename,
-        config.PRESIGN_TTL_SEC,
-      );
-
-      // UpdateItem conditionnel pour émettre une URL unique
-      try {
-        await docClient.send(
-          new UpdateCommand({
-            TableName: resTable,
-            Key: { linkId, reservationId },
-            UpdateExpression:
-              "SET #status = :issued, #url = :u, urlExpiresAt = :exp, issuedAt = :iat, filename = :fn",
-            ConditionExpression: "#status = :reserved",
-            ExpressionAttributeNames: { "#status": "status", "#url": "url" },
-            ExpressionAttributeValues: {
-              ":issued": "url_issued",
-              ":u": url,
-              ":exp": expiresAtEpochSec,
-              ":iat": Math.floor(Date.now() / 1000),
-              ":fn": filename,
-              ":reserved": "reserved",
-            },
-          }),
-        );
-
-        return {
-          status: 200,
-          body: {
-            state: "granted",
-            url,
-            expiresAt: expiresAtEpochSec,
-            reservationId,
-            filename,
-          },
-        };
-      } catch {
-        // En cas de course, relire
-        const reRead = await docClient.send(
-          new GetCommand({
-            TableName: resTable,
-            Key: { linkId, reservationId },
-            ConsistentRead: true,
-          }),
-        );
-        if (reRead.Item) {
-          return mapReservationToResponse(reRead.Item as ReservationRecord);
-        }
-      }
-    }
-
-    // Vérifier si le job a échoué
-    const job = await getPdfJob(res.docId, versionId);
-    if (job?.status === "failed") {
-      // Déclencher le remboursement (Section 10.5)
-      await refundReservation(linkId, reservationId);
-      return { status: 200, body: { state: "failed" } };
-    }
-
-    const retryMs = computeRetryAfterMs(2);
-    return {
-      status: 202,
-      body: { state: "preparing", retryAfterMs: retryMs, reservationId },
-      retryAfterSec: Math.ceil(retryMs / 1000),
-    };
   }
 
   return { status: 500, body: { state: "failed" } };

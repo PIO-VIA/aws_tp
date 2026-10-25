@@ -1,0 +1,39 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 1,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 2,
+  "numPassedTests": 2,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "startTime": 1700000000000,
+  "success": true,
+  "testResults": [
+    {
+      "name": "/path/tests/unit/example.test.ts",
+      "status": "passed",
+      "startTime": 1700000000000,
+      "endTime": 1700000000100,
+      "assertionResults": [
+        {
+          "ancestorTitles": ["Suite Unit"],
+          "fullName": "Suite Unit test unitaire 1",
+          "title": "test unitaire 1",
+          "status": "passed",
+          "duration": 12,
+          "failureMessages": []
+        },
+        {
+          "ancestorTitles": ["Suite Unit"],
+          "fullName": "Suite Unit test unitaire 2",
+          "title": "test unitaire 2",
+          "status": "passed",
+          "duration": 18,
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

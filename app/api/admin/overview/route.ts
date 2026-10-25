@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
-import { getDocClient } from "@/src/shared/aws/dynamodb";
+import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { getDocClient, scanAll } from "@/src/shared/aws/dynamodb";
 import { tableName, getConfig } from "@/src/shared/config";
 import { timingSafeCompare } from "@/src/shared/auth/jwt";
 import { LinkRecord } from "@/src/shared/links/types";
@@ -82,16 +82,13 @@ export async function GET(request: NextRequest) {
       }),
     );
 
-    // 2. Liens actifs
-    const linksRes = await docClient.send(
-      new ScanCommand({
-        TableName: tableName("links"),
-        FilterExpression: "#st = :active",
-        ExpressionAttributeNames: { "#st": "status" },
-        ExpressionAttributeValues: { ":active": "active" },
-      }),
-    );
-    const linksItems = (linksRes.Items as LinkRecord[]) ?? [];
+    // 2. Liens actifs (scan paginé C-06)
+    const linksItems = await scanAll<LinkRecord>({
+      TableName: tableName("links"),
+      FilterExpression: "#st = :active",
+      ExpressionAttributeNames: { "#st": "status" },
+      ExpressionAttributeValues: { ":active": "active" },
+    });
 
     const activeLinks = await Promise.all(
       linksItems.map(async (l) => {
@@ -121,15 +118,12 @@ export async function GET(request: NextRequest) {
       }),
     );
 
-    // 3. Rédacteurs bloqués
-    const writersRes = await docClient.send(
-      new ScanCommand({
-        TableName: tableName("writers"),
-        FilterExpression: "attribute_exists(blockedUntil) AND blockedUntil > :now",
-        ExpressionAttributeValues: { ":now": now },
-      }),
-    );
-    const writersItems = (writersRes.Items as (WriterRecord & { blockedReason?: string })[]) ?? [];
+    // 3. Rédacteurs bloqués (scan paginé C-06)
+    const writersItems = await scanAll<WriterRecord & { blockedReason?: string }>({
+      TableName: tableName("writers"),
+      FilterExpression: "attribute_exists(blockedUntil) AND blockedUntil > :now",
+      ExpressionAttributeValues: { ":now": now },
+    });
 
     const blockedWriters = writersItems.map((w) => ({
       writerId: w.writerId,

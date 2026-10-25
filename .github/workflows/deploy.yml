@@ -1,13 +1,17 @@
 name: CD Deploy Pipeline
 
 on:
-  workflow_dispatch:
-  push:
+  workflow_run:
+    workflows: ["CI Pipeline"]
     branches:
       - main
-    paths-ignore:
-      - "docs/**"
-      - "*.md"
+    types:
+      - completed
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 
 permissions:
   id-token: write # Requis pour la fédération AWS OIDC
@@ -17,14 +21,17 @@ jobs:
   deploy:
     name: Build, Deploy & Smoke Test
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     environment: production # Environnement protégé GitHub Actions
 
     env:
-      AWS_REGION: eu-north-1
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
 
     steps:
       - name: Checkout du code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # Permet d'obtenir le tag précédent pour le rollback éventuel
 
       - name: Création d'un .env.local pour l'environnement CD
         run: touch .env.local
@@ -38,7 +45,7 @@ jobs:
       - name: Authentification AWS via GitHub OIDC (sans clés stockées)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Installation des dépendances
@@ -51,24 +58,29 @@ jobs:
         run: |
           ./scripts/deploy/build-and-push.sh \
             "${{ env.AWS_REGION }}" \
-            "${{ secrets.ECR_APP_URL }}" \
-            "${{ secrets.ECR_COLLAB_URL }}"
+            "${{ vars.ECR_APP_URL }}" \
+            "${{ vars.ECR_COLLAB_URL }}"
 
       - name: Déploiement sur EC2 via SSM Run Command
         run: |
           GIT_SHA=$(git rev-parse --short HEAD)
-          ./scripts/deploy/deploy-ec2.sh "${GIT_SHA}" "${{ secrets.EC2_INSTANCE_ID }}" "${{ env.AWS_REGION }}"
+          ./scripts/deploy/deploy-ec2.sh "${GIT_SHA}" "${{ vars.EC2_INSTANCE_ID }}" "${{ env.AWS_REGION }}"
 
       - name: Mise à jour du code des fonctions Lambda
         run: |
           for lambda in download-api pdf-worker pdf-dlq-handler notifier reconciler; do
             echo "--> Mise à jour du code de la Lambda ${lambda}..."
             aws lambda update-function-code \
-              --function-name "${{ secrets.PROJECT_PREFIX }}-${lambda}" \
+              --function-name "${{ vars.PROJECT_PREFIX }}-${lambda}" \
               --zip-file "fileb://dist/lambdas/${lambda}.zip" \
               --region "${{ env.AWS_REGION }}"
           done
 
       - name: Exécution du test de fumée (Smoke Test) contre CloudFront
         run: |
-          npm run smoke -- --base-url "${{ secrets.CLOUDFRONT_URL }}"
+          PREV_TAG=$(git rev-parse --short HEAD~1 2>/dev/null || echo "latest")
+          if ! npm run smoke -- --base-url "${{ vars.CLOUDFRONT_URL }}"; then
+            echo "::error::Le smoke test a échoué. Déclenchez le retour arrière immédiat :"
+            echo "::error::./scripts/deploy/rollback-ec2.sh ${PREV_TAG} ${{ vars.EC2_INSTANCE_ID }} ${{ env.AWS_REGION }}"
+            exit 1
+          fi

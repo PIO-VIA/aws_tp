@@ -13,7 +13,7 @@
     "local:init": "tsx --env-file-if-exists=.env.local scripts/local-init.ts",
     "seed": "tsx --env-file-if-exists=.env.local scripts/seed.ts",
     "build": "next build",
-    "build:collab": "esbuild collab/server.ts --bundle --platform=node --target=node22 --outfile=dist/collab/server.js",
+    "build:collab": "tsx scripts/build-collab.ts",
     "build:lambdas": "tsx --env-file-if-exists=.env.local scripts/build-lambdas.ts",
     "start": "next start",
     "lint": "eslint",
@@ -21,8 +21,14 @@
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:scenarios": "vitest run tests/scenarios",
+    "test:report:unit": "vitest run tests/unit --reporter=json --outputFile=test-results/unit.json",
+    "test:report:integration": "vitest run tests/integration --reporter=json --outputFile=test-results/integration.json",
+    "test:report:scenarios": "vitest run tests/scenarios --reporter=json --outputFile=test-results/scenarios.json",
+    "report": "tsx scripts/gen-test-report.ts",
+    "test:all:report": "npm run test:report:unit && npm run test:report:integration && npm run test:report:scenarios && npm run report",
     "loadtest:download": "tsx --env-file-if-exists=.env.local loadtest/download-burst.ts",
     "loadtest:collab": "tsx --env-file-if-exists=.env.local loadtest/collab-sim.ts",
+    "loadtest:combined": "tsx --env-file-if-exists=.env.local loadtest/combined.ts",
     "smoke": "tsx --env-file-if-exists=.env.local scripts/smoke.ts"
   },
   "dependencies": {

@@ -40,7 +40,12 @@ resource "aws_cloudwatch_log_group" "reconciler" {
 }
 
 resource "aws_cloudwatch_log_group" "ec2_app" {
-  name              = "/opt/app/${local.name_prefix}"
+  name              = "/${var.project}/${var.environment}/app"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "ec2_collab" {
+  name              = "/${var.project}/${var.environment}/collab"
   retention_in_days = 14
 }
 

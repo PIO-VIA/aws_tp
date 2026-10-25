@@ -215,5 +215,10 @@ async function main() {
 
 main().catch((err) => {
   log.error("smoke.failed", { error: err });
+  console.error("\n================================================================================");
+  console.error("ÉCHEC DU SMOKE TEST — DÉPLOIEMENT NON VALIDÉ");
+  console.error("Commande de retour arrière immédiat :");
+  console.error("  ./scripts/deploy/rollback-ec2.sh <tag_precedent> [instance_id] [region]");
+  console.error("================================================================================\n");
   process.exit(1);
 });

@@ -57,3 +57,26 @@ output "eip_public_ip" {
   description = "Adresse IP publique élastique de l'instance EC2"
   value       = aws_eip.server.public_ip
 }
+
+output "ssm_parameter_names" {
+  description = "Noms des paramètres SSM Parameter Store attendus pour les secrets applicatifs"
+  value = [
+    "/${var.project}/${var.environment}/session-secret",
+    "/${var.project}/${var.environment}/internal-token",
+    "/${var.project}/${var.environment}/admin-token"
+  ]
+}
+
+output "log_group_names" {
+  description = "Noms des groupes de logs CloudWatch"
+  value = [
+    aws_cloudwatch_log_group.download_api.name,
+    aws_cloudwatch_log_group.pdf_worker.name,
+    aws_cloudwatch_log_group.pdf_dlq_handler.name,
+    aws_cloudwatch_log_group.notifier.name,
+    aws_cloudwatch_log_group.reconciler.name,
+    aws_cloudwatch_log_group.ec2_app.name,
+    aws_cloudwatch_log_group.ec2_collab.name
+  ]
+}
+

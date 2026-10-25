@@ -16,8 +16,9 @@ data "aws_iam_policy_document" "lambda_assume_role" {
 
 # 1. Rôle download-api
 resource "aws_iam_role" "download_api" {
-  name               = "${local.name_prefix}-lambda-download-api-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  name                 = "${local.name_prefix}-lambda-download-api-role"
+  permissions_boundary = var.permissions_boundary_arn
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_policy" "download_api" {
@@ -73,8 +74,9 @@ resource "aws_iam_role_policy_attachment" "download_api" {
 
 # 2. Rôle pdf-worker
 resource "aws_iam_role" "pdf_worker" {
-  name               = "${local.name_prefix}-lambda-pdf-worker-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  name                 = "${local.name_prefix}-lambda-pdf-worker-role"
+  permissions_boundary = var.permissions_boundary_arn
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_policy" "pdf_worker" {
@@ -139,8 +141,9 @@ resource "aws_iam_role_policy_attachment" "pdf_worker" {
 
 # 3. Rôle pdf-dlq-handler
 resource "aws_iam_role" "pdf_dlq_handler" {
-  name               = "${local.name_prefix}-lambda-pdf-dlq-handler-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  name                 = "${local.name_prefix}-lambda-pdf-dlq-handler-role"
+  permissions_boundary = var.permissions_boundary_arn
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_policy" "pdf_dlq_handler" {
@@ -195,8 +198,9 @@ resource "aws_iam_role_policy_attachment" "pdf_dlq_handler" {
 
 # 4. Rôle notifier
 resource "aws_iam_role" "notifier" {
-  name               = "${local.name_prefix}-lambda-notifier-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  name                 = "${local.name_prefix}-lambda-notifier-role"
+  permissions_boundary = var.permissions_boundary_arn
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_policy" "notifier" {
@@ -216,13 +220,21 @@ resource "aws_iam_policy" "notifier" {
         Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
       },
       {
+        # dynamodb:ListStreams ne supporte pas de ressource specifique selon IAM AWS (impose Resource = "*")
+        Sid    = "DynamoDBListStreams"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:ListStreams"
+        ]
+        Resource = "*"
+      },
+      {
         Sid    = "DynamoDBStreamRead"
         Effect = "Allow"
         Action = [
           "dynamodb:GetRecords",
           "dynamodb:GetShardIterator",
-          "dynamodb:DescribeStream",
-          "dynamodb:ListStreams"
+          "dynamodb:DescribeStream"
         ]
         Resource = aws_dynamodb_table.links.stream_arn
       },
@@ -249,7 +261,12 @@ resource "aws_iam_policy" "notifier" {
           "ses:SendEmail",
           "ses:SendRawEmail"
         ]
-        Resource = "*"
+        Resource = "arn:aws:ses:${local.region}:${local.account_id}:identity/${var.ses_sender}"
+        Condition = {
+          StringEquals = {
+            "ses:FromAddress" = var.ses_sender
+          }
+        }
       }
     ]
   })
@@ -262,8 +279,9 @@ resource "aws_iam_role_policy_attachment" "notifier" {
 
 # 5. Rôle reconciler
 resource "aws_iam_role" "reconciler" {
-  name               = "${local.name_prefix}-lambda-reconciler-role"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  name                 = "${local.name_prefix}-lambda-reconciler-role"
+  permissions_boundary = var.permissions_boundary_arn
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_policy" "reconciler" {
@@ -317,7 +335,12 @@ resource "aws_iam_policy" "reconciler" {
           "ses:SendEmail",
           "ses:SendRawEmail"
         ]
-        Resource = "*"
+        Resource = "arn:aws:ses:${local.region}:${local.account_id}:identity/${var.ses_sender}"
+        Condition = {
+          StringEquals = {
+            "ses:FromAddress" = var.ses_sender
+          }
+        }
       }
     ]
   })
@@ -330,7 +353,8 @@ resource "aws_iam_role_policy_attachment" "reconciler" {
 
 # 6. Rôle et Profil d'Instance EC2
 resource "aws_iam_role" "ec2" {
-  name = "${local.name_prefix}-ec2-role"
+  name                 = "${local.name_prefix}-ec2-role"
+  permissions_boundary = var.permissions_boundary_arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -360,15 +384,26 @@ resource "aws_iam_policy" "ec2_app" {
     Version = "2012-10-17"
     Statement = [
       {
+        # ecr:GetAuthorizationToken ne supporte pas de ressource specifique selon IAM AWS (impose Resource = "*")
+        Sid    = "ECRAuth"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
         Sid    = "ECRPull"
         Effect = "Allow"
         Action = [
-          "ecr:GetAuthorizationToken",
           "ecr:BatchCheckLayerAvailability",
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage"
         ]
-        Resource = "*"
+        Resource = [
+          aws_ecr_repository.app.arn,
+          aws_ecr_repository.collab.arn
+        ]
       },
       {
         Sid    = "DynamoDBTables"
@@ -419,11 +454,13 @@ resource "aws_iam_policy" "ec2_app" {
         Sid    = "CloudWatchLogs"
         Effect = "Allow"
         Action = [
-          "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/opt/app/*"
+        Resource = [
+          "${aws_cloudwatch_log_group.ec2_app.arn}:*",
+          "${aws_cloudwatch_log_group.ec2_collab.arn}:*"
+        ]
       }
     ]
   })

@@ -290,20 +290,13 @@ paths:
                   example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
       responses:
         '200':
-          description: Exemplaire disponible immédiatement avec URL pré-signée
+          description: Exemplaire accordé immédiatement avec URL pré-signée
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  state:
-                    type: string
-                    example: "issued"
-                  downloadUrl:
-                    type: string
-                    example: "https://bucket.s3.amazonaws.com/pdfs/doc/ver.pdf?AWSAccessKeyId=..."
+                $ref: '#/components/schemas/DownloadStateGranted'
         '202':
-          description: Réservation acceptée, génération PDF en cours (polling nécessaire)
+          description: Réservation acceptée, génération PDF en cours ou attente temporaire
           headers:
             Retry-After:
               schema:
@@ -312,23 +305,21 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  state:
-                    type: string
-                    example: "preparing"
-                  reservationId:
-                    type: string
+                oneOf:
+                  - $ref: '#/components/schemas/DownloadStatePreparing'
+                  - $ref: '#/components/schemas/DownloadStateRetry'
         '410':
           description: Quota d'exemplaires épuisé (C1 respecté)
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  state:
-                    type: string
-                    example: "exhausted"
+                $ref: '#/components/schemas/DownloadStateExhausted'
+        '500':
+          description: Échec technique de la réservation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadStateFailed'
 
   /api/dl/{linkId}/reservations/{reservationId}:
     get:
@@ -336,23 +327,19 @@ paths:
       parameters:
         - $ref: '#/components/parameters/LinkId'
         - name: reservationId
-          in: path
+        - in: path
           required: true
           schema:
             type: string
       responses:
         '200':
-          description: PDF prêt et URL pré-signée émise
+          description: Exemplaire accordé ou URL expirée (sans réémission)
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  state:
-                    type: string
-                    example: "issued"
-                  downloadUrl:
-                    type: string
+                oneOf:
+                  - $ref: '#/components/schemas/DownloadStateGranted'
+                  - $ref: '#/components/schemas/DownloadStateExpired'
         '202':
           description: Rendu PDF toujours en cours
           headers:
@@ -363,11 +350,19 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  state:
-                    type: string
-                    example: "preparing"
+                $ref: '#/components/schemas/DownloadStatePreparing'
+        '410':
+          description: Quota d'exemplaires épuisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadStateExhausted'
+        '500':
+          description: Échec du rendu après retries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadStateFailed'
 
   # ----------------------------------------------------------------------------
   # Historique et Restauration (F10)
@@ -501,6 +496,69 @@ components:
           type: integer
         previewSnippet:
           type: string
+
+    DownloadStateGranted:
+      type: object
+      required: [state, url, expiresAt, reservationId, filename]
+      properties:
+        state:
+          type: string
+          enum: [granted]
+        url:
+          type: string
+          format: uri
+        expiresAt:
+          type: integer
+        reservationId:
+          type: string
+        filename:
+          type: string
+
+    DownloadStatePreparing:
+      type: object
+      required: [state, reservationId, retryAfterMs]
+      properties:
+        state:
+          type: string
+          enum: [preparing]
+        reservationId:
+          type: string
+        retryAfterMs:
+          type: integer
+
+    DownloadStateRetry:
+      type: object
+      required: [state, retryAfterMs]
+      properties:
+        state:
+          type: string
+          enum: [retry]
+        retryAfterMs:
+          type: integer
+
+    DownloadStateExhausted:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [exhausted]
+
+    DownloadStateFailed:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [failed]
+
+    DownloadStateExpired:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [expired]
 
   responses:
     BadRequest:

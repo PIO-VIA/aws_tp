@@ -1,0 +1,47 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 1,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 3,
+  "numPassedTests": 3,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "startTime": 1700000000400,
+  "success": true,
+  "testResults": [
+    {
+      "name": "/path/tests/scenarios/sc01-collab.test.ts",
+      "status": "passed",
+      "startTime": 1700000000400,
+      "endTime": 1700000000800,
+      "assertionResults": [
+        {
+          "ancestorTitles": ["SC01 — Collaboration et Convergence CRDT (C2)"],
+          "fullName": "SC01 — Collaboration et Convergence CRDT (C2) 1. Édition concurrente par 3 rédacteurs sans perte",
+          "title": "1. Édition concurrente par 3 rédacteurs sans perte",
+          "status": "passed",
+          "duration": 120,
+          "failureMessages": []
+        },
+        {
+          "ancestorTitles": ["SC01 — Collaboration et Convergence CRDT (C2)"],
+          "fullName": "SC01 — Collaboration et Convergence CRDT (C2) 2. Présence des curseurs distants (Awareness)",
+          "title": "2. Présence des curseurs distants (Awareness)",
+          "status": "passed",
+          "duration": 85,
+          "failureMessages": []
+        },
+        {
+          "ancestorTitles": ["SC01 — Collaboration et Convergence CRDT (C2)"],
+          "fullName": "SC01 — Collaboration et Convergence CRDT (C2) 3. Redémarrage à chaud du serveur : reconstruction exacte",
+          "title": "3. Redémarrage à chaud du serveur : reconstruction exacte",
+          "status": "passed",
+          "duration": 195,
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

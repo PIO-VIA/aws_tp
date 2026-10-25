@@ -36,6 +36,8 @@ ECR_APP_URL="${ECR_APP_URL}"
 ECR_COLLAB_URL="${ECR_COLLAB_URL}"
 DATA_BUCKET="${DATA_BUCKET}"
 PDF_QUEUE_URL="${PDF_QUEUE_URL}"
+LOG_GROUP_APP="${LOG_GROUP_APP}"
+LOG_GROUP_COLLAB="${LOG_GROUP_COLLAB}"
 
 # 3. Récupération des paramètres SSM pour constituer /opt/app/.env
 echo "=== [BOOTSTRAP] Récupération des paramètres SSM depuis $${SSM_PREFIX} ==="
@@ -48,6 +50,8 @@ PDF_QUEUE_URL=$${PDF_QUEUE_URL}
 SSM_PREFIX=$${SSM_PREFIX}
 ECR_APP_URL=$${ECR_APP_URL}
 ECR_COLLAB_URL=$${ECR_COLLAB_URL}
+LOG_GROUP_APP=$${LOG_GROUP_APP}
+LOG_GROUP_COLLAB=$${LOG_GROUP_COLLAB}
 EOF
 
 # Injection sécurisée de tous les paramètres sous SSM_PREFIX dans .env

@@ -64,7 +64,7 @@ variable "monthly_budget_usd" {
 variable "github_repo" {
   type        = string
   description = "Référentiel GitHub au format 'owner/repo' pour la fédération OIDC"
-  default     = "editeur/collaboratif"
+  default     = "PIO-VIA/aws_tp"
 }
 
 variable "enable_github_oidc" {
@@ -84,3 +84,26 @@ variable "pdf_presign_ttl_sec" {
   description = "Durée de validité des URL pré-signées S3 de téléchargement de PDF en secondes"
   default     = 60
 }
+
+variable "permissions_boundary_arn" {
+  type        = string
+  description = "ARN de la politique de permissions boundary obligatoire pour tous les rôles IAM"
+
+  validation {
+    condition     = can(regex("^arn:aws:iam::", var.permissions_boundary_arn))
+    error_message = "permissions_boundary_arn doit commencer par 'arn:aws:iam::'."
+  }
+}
+
+variable "github_environment" {
+  type        = string
+  description = "Nom de l'environnement GitHub Actions déployé (ex: production)"
+  default     = "production"
+}
+
+variable "cloudfront_price_class" {
+  type        = string
+  description = "Classe de prix CloudFront (PriceClass_All pour inclure l'Afrique/Yaoundé, ou PriceClass_100)"
+  default     = "PriceClass_All"
+}
+

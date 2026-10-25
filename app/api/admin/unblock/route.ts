@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       new UpdateCommand({
         TableName: writersTable,
         Key: { writerId },
-        UpdateExpression: "REMOVE blockedUntil, blockedReason",
+        UpdateExpression: "REMOVE blockedUntil, blockReason, blockedReason",
       }),
     );
 

@@ -213,7 +213,21 @@ export default function EditorPage({
                     setRefusalMessage("Modification rejetée : contenu non autorisé.");
                   } else if (data.reason === "persist_failed") {
                     setRefusalMessage("Erreur de persistance sur le serveur. La modification n'a pas été appliquée.");
-                  } else if (data.reason === "read_only" || data.reason === "blocked") {
+                  } else if (data.reason === "blocked") {
+                    const timeStr = data.blockedUntil
+                      ? new Date(data.blockedUntil * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                      : "";
+                    setRefusalMessage(timeStr ? `Compte bloqué jusqu'à ${timeStr}` : "Compte bloqué.");
+                  } else if (data.reason === "rate_limited") {
+                    const timeStr = data.blockedUntil
+                      ? new Date(data.blockedUntil * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                      : "";
+                    setRefusalMessage(
+                      timeStr
+                        ? `Compte bloqué jusqu'à ${timeStr} (débit de frappe excessif)`
+                        : "Débit de frappe excessif : modification rejetée. Passage en lecture seule.",
+                    );
+                  } else if (data.reason === "read_only") {
                     setRefusalMessage("Accès en lecture seule.");
                   }
                 });
@@ -233,7 +247,12 @@ export default function EditorPage({
             if (event.event?.code === 4403) {
               startTransition(() => {
                 setIsReadOnly(true);
-                setRefusalMessage("Connexion fermée par le serveur : Quota dépassé. Passage en lecture seule.");
+                const reason = event.event?.reason || "";
+                if (reason.toLowerCase().includes("bloqué") || reason.toLowerCase().includes("abus")) {
+                  setRefusalMessage("Connexion fermée par le serveur : compte bloqué pour abus. Passage en lecture seule.");
+                } else {
+                  setRefusalMessage("Connexion fermée par le serveur : Quota dépassé. Passage en lecture seule.");
+                }
               });
               if (editorViewRef.current) {
                 editorViewRef.current.dispatch({

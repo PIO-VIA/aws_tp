@@ -1,11 +1,10 @@
-import { ScanCommand, UpdateCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
-import { getDocClient } from "../aws/dynamodb";
+import { UpdateCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { getDocClient, scanAll } from "../aws/dynamodb";
 import { tableName, getConfig } from "../config";
-import { sendEmail } from "../aws/mailer";
 import { sendPdfJob } from "../aws/sqs";
 import { refundReservation } from "../links/refund";
-import { getDocumentById } from "../docs/documents";
-import { LinkRecord, NotificationRecord, PdfJobRecord, ReservationRecord } from "../links/types";
+import { sendLastCopyNotification } from "../notify/notifier";
+import { NotificationRecord, PdfJobRecord, ReservationRecord } from "../links/types";
 import { log } from "../log";
 
 export interface ReconcileStats {
@@ -22,108 +21,32 @@ export interface ReconcileStats {
 /**
  * 1. Réconciliation des notifications en attente (F11, Section 12).
  * Tente de renvoyer le mail pour les liens saturés si attempts < 5.
+ * Délègue à sendLastCopyNotification avec réservation atomique (C-06).
  */
 export async function reconcileNotifications(): Promise<{ sent: number; failed: number; pending: number }> {
-  const docClient = getDocClient();
   const notifTable = tableName("notifications");
-  const linksTable = tableName("links");
 
   let sent = 0;
   let failed = 0;
   let pending = 0;
 
   try {
-    const scanRes = await docClient.send(
-      new ScanCommand({
-        TableName: notifTable,
-        FilterExpression: "#st = :pending AND attempts < :maxAttempts",
-        ExpressionAttributeNames: { "#st": "status" },
-        ExpressionAttributeValues: { ":pending": "pending", ":maxAttempts": 5 },
-      }),
-    );
+    const items = await scanAll<NotificationRecord>({
+      TableName: notifTable,
+      FilterExpression: "#st = :pending AND attempts < :maxAttempts",
+      ExpressionAttributeNames: { "#st": "status" },
+      ExpressionAttributeValues: { ":pending": "pending", ":maxAttempts": 5 },
+    });
 
-    const items = (scanRes.Items as NotificationRecord[]) ?? [];
     pending = items.length;
 
     for (const notif of items) {
-      // Récupérer les détails du lien
-      const linkRes = await docClient.send(
-        new GetCommand({
-          TableName: linksTable,
-          Key: { linkId: notif.linkId },
-        }),
-      );
-
-      const link = linkRes.Item as LinkRecord | undefined;
-      if (!link) {
-        log.warn("reconcile.notification.link_not_found", { linkId: notif.linkId });
-        continue;
-      }
-
-      let docTitle = "Document";
-      try {
-        const doc = await getDocumentById(link.docId);
-        if (doc?.title) docTitle = doc.title;
-      } catch {
-        // Fallback
-      }
-
-      const subject = `[Journal] Dernier exemplaire téléchargé pour « ${docTitle} »`;
-      const text = [
-        `Bonjour ${link.creatorName || "Rédacteur"},`,
-        ``,
-        `La limite de téléchargements autorisée pour votre document « ${docTitle} » a été atteinte.`,
-        `- Nombre d'exemplaires autorisés : ${link.maxDownloads}`,
-        `- Exemplaires distribués : ${link.issued}`,
-        `- Identifiant du lien : ${link.linkId}`,
-        `- Heure (UTC) : ${new Date().toISOString()}`,
-        ``,
-        `Le lien est désormais fermé aux nouvelles demandes de téléchargement.`,
-        ``,
-        `Cordialement,`,
-        `L'équipe de l'association.`,
-      ].join("\n");
-
-      try {
-        await sendEmail({
-          to: link.creatorEmail,
-          subject,
-          text,
-        });
-
-        const now = Math.floor(Date.now() / 1000);
-        await docClient.send(
-          new UpdateCommand({
-            TableName: notifTable,
-            Key: { linkId: notif.linkId },
-            UpdateExpression: "SET #st = :sent, sentAt = :now",
-            ExpressionAttributeNames: { "#st": "status" },
-            ExpressionAttributeValues: { ":sent": "sent", ":now": now },
-          }),
-        );
-
-        log.info("reconcile.notification.sent", { linkId: notif.linkId, to: link.creatorEmail });
+      const res = await sendLastCopyNotification(notif.linkId);
+      if (res.sent) {
         sent++;
-      } catch (err: unknown) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const nextAttempts = (notif.attempts || 0) + 1;
-
-        await docClient.send(
-          new UpdateCommand({
-            TableName: notifTable,
-            Key: { linkId: notif.linkId },
-            UpdateExpression: "SET attempts = :a, lastError = :err",
-            ExpressionAttributeValues: { ":a": nextAttempts, ":err": errMsg },
-          }),
-        );
-
-        if (nextAttempts >= 5) {
-          log.error("reconcile.notification.abandoned_max_attempts", {
-            linkId: notif.linkId,
-            attempts: nextAttempts,
-            error: errMsg,
-          });
-        }
+      } else if (res.reason === "already_claimed_or_sent") {
+        // Concurremment traité par un autre worker
+      } else {
         failed++;
       }
     }
@@ -137,6 +60,7 @@ export async function reconcileNotifications(): Promise<{ sent: number; failed: 
 /**
  * 2. Réconciliation des jobs de rendu PDF (C3, Section 12).
  * Relance les jobs pending/running inactifs depuis plus de 2 minutes (max 3 tentatives).
+ * Utilise scanAll paginé (C-06).
  */
 export async function reconcilePdfJobs(): Promise<{ checked: number; republished: number; markedFailed: number }> {
   const docClient = getDocClient();
@@ -149,16 +73,13 @@ export async function reconcilePdfJobs(): Promise<{ checked: number; republished
   let markedFailed = 0;
 
   try {
-    const scanRes = await docClient.send(
-      new ScanCommand({
-        TableName: pdfJobsTable,
-        FilterExpression: "#st IN (:p, :r)",
-        ExpressionAttributeNames: { "#st": "status" },
-        ExpressionAttributeValues: { ":p": "pending", ":r": "running" },
-      }),
-    );
+    const jobs = await scanAll<PdfJobRecord>({
+      TableName: pdfJobsTable,
+      FilterExpression: "#st IN (:p, :r)",
+      ExpressionAttributeNames: { "#st": "status" },
+      ExpressionAttributeValues: { ":p": "pending", ":r": "running" },
+    });
 
-    const jobs = (scanRes.Items as PdfJobRecord[]) ?? [];
     checked = jobs.length;
 
     for (const job of jobs) {
@@ -212,6 +133,7 @@ export async function reconcilePdfJobs(): Promise<{ checked: number; republished
  * 3. Réconciliation des réservations orphelines (C1, Section 12).
  * Libère les réservations restées en statut 'reserved' depuis plus de RESERVATION_MAX_AGE_SEC
  * sans job actif. Ne rembourse JAMAIS si url_issued !
+ * Utilise scanAll paginé (C-06).
  */
 export async function reconcileReservations(): Promise<{ checked: number; refunded: number }> {
   const docClient = getDocClient();
@@ -225,16 +147,13 @@ export async function reconcileReservations(): Promise<{ checked: number; refund
   let refunded = 0;
 
   try {
-    const scanRes = await docClient.send(
-      new ScanCommand({
-        TableName: resTable,
-        FilterExpression: "#st = :reserved",
-        ExpressionAttributeNames: { "#st": "status" },
-        ExpressionAttributeValues: { ":reserved": "reserved" },
-      }),
-    );
+    const items = await scanAll<ReservationRecord>({
+      TableName: resTable,
+      FilterExpression: "#st = :reserved",
+      ExpressionAttributeNames: { "#st": "status" },
+      ExpressionAttributeValues: { ":reserved": "reserved" },
+    });
 
-    const items = (scanRes.Items as ReservationRecord[]) ?? [];
     checked = items.length;
 
     for (const res of items) {

@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-10-25T00:51:27.995Z",
+  "testName": "download-burst",
+  "environment": {
+    "nodeVersion": "v24.21.0",
+    "osPlatform": "linux",
+    "osRelease": "7.0.0-38-generic",
+    "cpuModel": "Intel(R) Core(TM) Ultra 7 155U",
+    "cpuCores": 14,
+    "totalMemoryMb": 14668,
+    "mode": "development"
+  },
+  "config": {
+    "totalVisitors": 600,
+    "maxCopies": 500,
+    "burstRatio": 0.8,
+    "phase1Sec": 60,
+    "phase2Sec": 240,
+    "timeScale": 10,
+    "maxWaitSec": 30,
+    "targetUrl": "http://127.0.0.1:3000/api/dl/pw8Pror8a3KDhKGzhIGC8w/request"
+  },
+  "metrics": {
+    "totalRequests": 650,
+    "totalVisitors": 600,
+    "distinctPresignedUrls": 10,
+    "dbIssuedCount": 500,
+    "grantedCount": 500,
+    "exhaustedCount": 100,
+    "failedCount": 0,
+    "expiredCount": 0,
+    "errors5xxCount": 0,
+    "networkErrorsCount": 0,
+    "unhandledCount": 0,
+    "c6LastGrantedToFirstExhaustedMs": 123,
+    "initialLatenciesMs": {
+      "min": 8,
+      "p50": 1117,
+      "p90": 5390,
+      "p95": 5593,
+      "p99": 5650,
+      "max": 5692,
+      "mean": 2062.2
+    },
+    "totalJourneyLatenciesMs": {
+      "min": 9,
+      "p50": 1228,
+      "p90": 5545,
+      "p95": 5642,
+      "p99": 6552,
+      "max": 7265,
+      "mean": 2363.9
+    },
+    "totalDurationSec": 29.8,
+    "throughputReqSec": 21.8
+  },
+  "invariants": {
+    "c1RespectStrict": true,
+    "c1DistinctUrlsMatchIssued": false,
+    "zeroUnhandledRequests": true,
+    "zeroErrors5xx": true,
+    "p95UnderTarget": false
+  }
+}

@@ -37,8 +37,8 @@ async function buildLambda(name: string) {
 
   log.info(`build_lambda.${name}.bundling`);
 
-  // Bundle esbuild
-  await esbuild.build({
+  // Bundle esbuild avec metafile activé pour contrôle des dépendances (C-04)
+  const buildResult = await esbuild.build({
     entryPoints: [entryPoint],
     bundle: true,
     platform: "node",
@@ -47,6 +47,7 @@ async function buildLambda(name: string) {
     outfile: path.resolve(lambdaDistDir, "index.js"),
     sourcemap: "inline",
     minify: false,
+    metafile: true,
     external: [],
     banner: {
       js: 'const import_meta_url = typeof __filename !== "undefined" ? require("url").pathToFileURL(__filename).href : "file:///var/task/index.js";',
@@ -56,6 +57,19 @@ async function buildLambda(name: string) {
     },
     conditions: ["node", "require"],
   });
+
+  // Sauvegarde du metafile
+  const metafilePath = path.resolve(DIST_DIR, `${name}.metafile.json`);
+  fs.writeFileSync(metafilePath, JSON.stringify(buildResult.metafile, null, 2), "utf-8");
+
+  // Règle C-04 : node_modules/pdfkit ne doit apparaître QUE dans pdf-worker
+  if (name !== "pdf-worker") {
+    const inputs = Object.keys(buildResult.metafile.inputs);
+    const hasPdfKit = inputs.some((inp) => inp.includes("node_modules/pdfkit"));
+    if (hasPdfKit) {
+      throw new Error(`[C-04] node_modules/pdfkit ne doit pas apparaître dans le bundle de ${name}`);
+    }
+  }
 
   // Copie des polices pour le worker PDF (DejaVu Sans + standard-fonts de pdfkit)
   if (name === "pdf-worker") {
@@ -103,6 +117,9 @@ async function buildLambda(name: string) {
   });
 
   const stats = fs.statSync(zipPath);
+  if (name === "download-api" && stats.size >= 3 * 1024 * 1024) {
+    throw new Error(`[C-04] La taille du zip download-api (${(stats.size / 1024 / 1024).toFixed(2)} Mo) doit être < 3 Mo`);
+  }
   log.info(`build_lambda.${name}.completed`, {
     zipPath,
     sizeBytes: stats.size,

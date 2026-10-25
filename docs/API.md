@@ -220,48 +220,91 @@ Demande atomique de téléchargement d'un exemplaire (C1).
     "requestId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
   }
   ```
-- **Réponse 200 (Immédiat - PDF déjà rendu)** :
-  ```json
-  {
-    "state": "issued",
-    "downloadUrl": "https://bucket.s3.amazonaws.com/pdfs/.../doc.pdf?AWSAccessKeyId=..."
-  }
-  ```
-- **Réponse 202 (Différé - Rendu PDF en cours)** :
-  ```json
-  {
-    "state": "preparing",
-    "reservationId": "res-550e8400-e29b-41d4-a716-446655440000"
-  }
-  ```
-  *En-tête* : `Retry-After: 2`
-- **Réponse 410 (Épuisé)** :
-  ```json
-  {
-    "state": "exhausted"
-  }
-  ```
+- **Réponses possibles (États conformes au protocole)** :
+  - **`granted` (HTTP 200)** — Exemplaire accordé immédiatement avec URL pré-signée :
+    ```json
+    {
+      "state": "granted",
+      "url": "https://bucket.s3.amazonaws.com/pdfs/.../doc.pdf?AWSAccessKeyId=...",
+      "expiresAt": 1729792860,
+      "reservationId": "res-550e8400-e29b-41d4-a716-446655440000",
+      "filename": "rapport-annuel.pdf"
+    }
+    ```
+  - **`preparing` (HTTP 202)** — Réservation enregistrée, génération PDF en cours dans le worker SQS :
+    ```json
+    {
+      "state": "preparing",
+      "reservationId": "res-550e8400-e29b-41d4-a716-446655440000",
+      "retryAfterMs": 2000
+    }
+    ```
+    *En-tête* : `Retry-After: 2`
+  - **`retry` (HTTP 202)** — Conflit transitoire ou attente de verrou, réessayer :
+    ```json
+    {
+      "state": "retry",
+      "retryAfterMs": 1500
+    }
+    ```
+    *En-tête* : `Retry-After: 2`
+  - **`exhausted` (HTTP 410)** — Quota d'exemplaires épuisé (`issued >= maxDownloads`, C1) :
+    ```json
+    {
+      "state": "exhausted"
+    }
+    ```
+  - **`failed` (HTTP 500)** — Échec technique irrécupérable de la réservation.
+    ```json
+    {
+      "state": "failed"
+    }
+    ```
 
 ### `GET /api/dl/:linkId/reservations/:reservationId`
 Polling de récupération de l'URL pré-signée pour un exemplaire préalablement réservé.
-- **Réponse 200 (Prêt)** :
-  ```json
-  {
-    "state": "issued",
-    "downloadUrl": "https://bucket.s3.amazonaws.com/pdfs/.../doc.pdf?AWSAccessKeyId=..."
-  }
-  ```
-- **Réponse 202 (En cours)** :
-  ```json
-  {
-    "state": "preparing"
-  }
-  ```
-  *En-tête* : `Retry-After: 2`
+- **Réponses possibles** :
+  - **`granted` (HTTP 200)** — PDF rendu et URL pré-signée délivrée :
+    ```json
+    {
+      "state": "granted",
+      "url": "https://bucket.s3.amazonaws.com/pdfs/.../doc.pdf?AWSAccessKeyId=...",
+      "expiresAt": 1729792860,
+      "reservationId": "res-550e8400-e29b-41d4-a716-446655440000",
+      "filename": "rapport-annuel.pdf"
+    }
+    ```
+  - **`preparing` (HTTP 202)** — Rendu toujours en cours :
+    ```json
+    {
+      "state": "preparing",
+      "reservationId": "res-550e8400-e29b-41d4-a716-446655440000",
+      "retryAfterMs": 2000
+    }
+    ```
+    *En-tête* : `Retry-After: 2`
+  - **`expired` (HTTP 200)** — URL pré-signée expirée après son TTL de 60s (pas de réémission, D-04/D-05) :
+    ```json
+    {
+      "state": "expired"
+    }
+    ```
+  - **`exhausted` (HTTP 410)** — Exemplaires épuisés :
+    ```json
+    {
+      "state": "exhausted"
+    }
+    ```
+  - **`failed` (HTTP 500)** — Génération PDF échouée après 3 retries (remboursement DLQ déclenché) :
+    ```json
+    {
+      "state": "failed"
+    }
+    ```
 
 ---
 
-## 5. Historique et Restauration (F10)
+## 5. Historique et Restauration (F05)
 
 ### `GET /api/documents/:docId/versions`
 Liste les versions figées (snapshots S3) d'un document.

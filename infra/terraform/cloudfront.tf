@@ -15,7 +15,7 @@ resource "aws_cloudfront_distribution" "cdn" {
   enabled         = true
   is_ipv6_enabled = true
   comment         = "Distribution CloudFront - ${local.name_prefix}"
-  price_class     = "PriceClass_100" # Europe et Amerique du Nord uniquement (economique)
+  price_class     = var.cloudfront_price_class
 
   # 1. Origine EC2 (HTTP 80)
   origin {

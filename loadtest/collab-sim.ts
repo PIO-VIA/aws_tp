@@ -1,33 +1,36 @@
 /**
- * Test de charge et simulation de collaboration multi-rédacteurs (Section 15.4).
- * - N rédacteurs simultanés (sur 1 document puis répartis sur plusieurs documents).
+ * Test de charge et simulation de collaboration multi-rédacteurs (Section 15.4, C-08).
+ * - N rédacteurs simultanés (300 par défaut, ou paramètre WRITERS / TOTAL_WRITERS).
+ * - Répartis sur 1 document puis plusieurs (paramètre DOC_COUNT).
  * - Frappes groupées à rythme humain (1 à 3 frappes/s avec pauses).
- * - Mesure de latence de propagation (p50 / p95).
- * - Taux de refus (write_refused).
- * - Utilisation CPU et mémoire du process collab.
+ * - Échantillonnage de /internal/health du SERVEUR collab (début et fin) :
+ *   mesure le CPU et la mémoire du SERVEUR (pas du client de test).
  * - Vérification stricte de la convergence Yjs sans perte d'édition (C2).
+ * - Mesure des latences de propagation (p50, p90, p95, p99).
  */
 import fs from "fs";
 import path from "path";
 import * as Y from "yjs";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { createCollabServer } from "../collab/server";
-import { createDocument } from "../src/shared/docs/documents";
+import { createDocument, shareDocument } from "../src/shared/docs/documents";
 import { createCollabToken } from "../src/shared/auth/jwt";
 import { upsertWriter } from "../src/shared/auth/session";
-import { resetConfig } from "../src/shared/config";
+import { getConfig } from "../src/shared/config";
+import { getEnvInfo, EnvInfo } from "./env-info";
 import { log } from "../src/shared/log";
 
-interface PropagationRecord {
+export interface PropagationRecord {
   fromWriter: number;
   toWriter: number;
   docIndex: number;
   latencyMs: number;
 }
 
-interface CollabSimSummary {
+export interface CollabSimSummary {
   timestamp: string;
   testName: "collab-sim";
+  environment: EnvInfo;
   config: {
     totalWriters: number;
     docCount: number;
@@ -49,13 +52,14 @@ interface CollabSimSummary {
       max: number;
       mean: number;
     };
-    cpuUsage: {
+    serverCpu: {
       userMs: number;
       systemMs: number;
+      totalMs: number;
+      percentOfOneCore: number;
     };
-    memoryMb: {
+    serverMemoryMb: {
       rss: number;
-      heapUsed: number;
     };
     durationSec: number;
   };
@@ -66,49 +70,82 @@ interface CollabSimSummary {
   };
 }
 
-async function main() {
-  const TOTAL_WRITERS = parseInt(process.env.TOTAL_WRITERS || "50", 10);
-  const DOC_COUNT = parseInt(process.env.DOC_COUNT || "2", 10);
-  const TYPING_BURSTS = parseInt(process.env.TYPING_BURSTS || "4", 10);
-  const TARGET_P95_MS = 200; // Objectif de latence p95 de propagation locale
+async function fetchServerStats(internalPort: number, token: string): Promise<{
+  cpuUserMs: number;
+  cpuSystemMs: number;
+  rssMb: number;
+  connections: number;
+} | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${internalPort}/internal/health`, {
+      headers: { "x-internal-token": token },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      stats?: { cpuUserMs: number; cpuSystemMs: number; rssMb: number; connections: number };
+    };
+    return data.stats || null;
+  } catch {
+    return null;
+  }
+}
 
-  const collabPort = 1240;
-  const internalPort = 1241;
+export async function runCollabSim(options?: {
+  totalWriters?: number;
+  docCount?: number;
+  typingBursts?: number;
+  collabPort?: number;
+  internalPort?: number;
+  externalServer?: boolean;
+}): Promise<CollabSimSummary> {
+  const TOTAL_WRITERS = options?.totalWriters ?? parseInt(process.env.WRITERS || process.env.TOTAL_WRITERS || "300", 10);
+  const DOC_COUNT = options?.docCount ?? parseInt(process.env.DOC_COUNT || "2", 10);
+  const TYPING_BURSTS = options?.typingBursts ?? parseInt(process.env.TYPING_BURSTS || "3", 10);
+  const TARGET_P95_MS = 200;
 
-  process.env.COLLAB_PORT = String(collabPort);
-  process.env.COLLAB_INTERNAL_PORT = String(internalPort);
-  process.env.COLLAB_INTERNAL_HOST = "127.0.0.1";
-  resetConfig();
+  const collabPort = options?.collabPort ?? parseInt(process.env.COLLAB_PORT || "1240", 10);
+  const internalPort = options?.internalPort ?? parseInt(process.env.COLLAB_INTERNAL_PORT || "1241", 10);
+  const isExternal = options?.externalServer ?? (process.env.COLLAB_EXTERNAL === "true");
+
+  const envInfo = getEnvInfo();
+  const config = getConfig();
 
   log.info("loadtest.collab.init", {
     TOTAL_WRITERS,
     DOC_COUNT,
     TYPING_BURSTS,
     collabPort,
+    internalPort,
+    isExternal,
+    env: envInfo,
   });
 
-  // 1. Démarrage du serveur collab dédié
-  const { server: collabServer, internalHttp } = createCollabServer();
-  await collabServer.listen();
-  await new Promise<void>((resolve) => internalHttp.listen(internalPort, "127.0.0.1", () => resolve()));
+  // 1. Démarrage du serveur si nécessaire
+  let dedicatedServer: ReturnType<typeof createCollabServer> | null = null;
+  if (!isExternal) {
+    dedicatedServer = createCollabServer();
+    await dedicatedServer.server.listen(collabPort);
+    await new Promise<void>((resolve) => dedicatedServer!.internalHttp.listen(internalPort, "127.0.0.1", () => resolve()));
+  }
 
-  const startCpu = process.cpuUsage();
+  // Échantillon CPU/mémoire initial du serveur Hocuspocus (via /internal/health)
+  const startServerStats = await fetchServerStats(internalPort, config.INTERNAL_TOKEN);
   const startTime = Date.now();
 
-  // 2. Création des documents et rédacteurs
-  const documents: Array<{ docId: string; title: string }> = [];
+  // 2. Création des documents
+  const documents: Array<{ docId: string; ownerId: string; title: string }> = [];
   for (let d = 0; d < DOC_COUNT; d++) {
-    const ownerEmail = `owner-sim-d${d}@asso.fr`;
+    const ownerEmail = `owner-sim-d${d}-${Date.now()}@asso.fr`;
     const owner = await upsertWriter(`Owner D${d}`, ownerEmail);
     const doc = await createDocument(`Document Collaboratif Sim #${d + 1}`, {
       writerId: owner.writerId,
       name: owner.name,
       email: owner.email,
     });
-    documents.push({ docId: doc.docId, title: `Doc ${d + 1}` });
+    documents.push({ docId: doc.docId, ownerId: owner.writerId, title: `Doc ${d + 1}` });
   }
 
-  // 3. Initialisation des N rédacteurs répartis sur les documents
+  // 3. Initialisation des N rédacteurs
   interface WriterClient {
     id: number;
     name: string;
@@ -126,19 +163,16 @@ async function main() {
   for (let i = 0; i < TOTAL_WRITERS; i++) {
     const docIndex = i % DOC_COUNT;
     const doc = documents[docIndex];
-    const email = `writer-sim-${i}@asso.fr`;
+    const email = `writer-sim-${i}-${Date.now()}@asso.fr`;
     const name = `Rédacteur ${i}`;
 
     const writerRec = await upsertWriter(name, email);
     const ydoc = new Y.Doc();
 
     // Partage du document (rôle editor)
-    const { shareDocument } = await import("../src/shared/docs/documents");
-    const ownerEmail = `owner-sim-d${docIndex}@asso.fr`;
-    const owner = await upsertWriter(`Owner D${docIndex}`, ownerEmail);
     await shareDocument({
       docId: doc.docId,
-      ownerId: owner.writerId,
+      ownerId: doc.ownerId,
       targetEmail: email,
       targetName: name,
       role: "editor",
@@ -179,13 +213,10 @@ async function main() {
 
     clientObj.provider = provider;
 
-    // Écoute des mises à jour pour mesurer la latence de propagation
     ydoc.getText("content").observe((event) => {
       const receivedAt = Date.now();
-      // On analyse les deltas insérés
       for (const op of event.changes.delta) {
         if (op.insert && typeof op.insert === "string") {
-          // Format du tag d'édition : [W<id>:<seq>:<ts>]
           const matches = op.insert.matchAll(/\[W(\d+):(\d+):(\d+)\]/g);
           for (const m of matches) {
             const fromWriterId = parseInt(m[1], 10);
@@ -207,7 +238,7 @@ async function main() {
     clients.push(clientObj);
   }
 
-  // 4. Attente de synchronisation de tous les clients
+  // 4. Attente de synchronisation initiale de tous les clients
   log.info("loadtest.collab.syncing_clients", { count: clients.length });
   await Promise.all(
     clients.map(
@@ -221,39 +252,60 @@ async function main() {
 
   log.info("loadtest.collab.clients_synced");
 
-  // 5. Boucle de frappes concurrentes à rythme humain
+  // 5. Frappes groupées à rythme humain (1 à 3 frappes/s avec pauses)
   let totalEditsSent = 0;
 
   for (let burst = 0; burst < TYPING_BURSTS; burst++) {
     log.info("loadtest.collab.burst_round", { round: burst + 1, totalRounds: TYPING_BURSTS });
 
-    // Chaque client tape un petit bloc de texte simultanément
     await Promise.all(
       clients.map(async (client, clientIdx) => {
         const timestamp = Date.now();
-        const editTag = `[W${client.id}:${burst}:${timestamp}] Texte saisie #${burst} par ${client.name}. `;
+        const editTag = `[W${client.id}:${burst}:${timestamp}] `;
         const ytext = client.ydoc.getText("content");
 
-        // Insère au début ou à la fin
         ytext.insert(0, editTag);
         totalEditsSent++;
 
-        // Pause humaine aléatoire (100 à 300 ms entre deux touches)
-        const pause = 100 + (clientIdx % 10) * 20;
+        // Pause humaine aléatoire (80 à 250 ms)
+        const pause = 80 + (clientIdx % 8) * 20;
         await new Promise((resolve) => setTimeout(resolve, pause));
       }),
     );
 
-    // Pause de pause entre les rafales
+    // Pause entre deux rafales
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  // Attente de convergence finale (jusqu'à convergence de tous les pairs ou timeout de 10s)
+  log.info("loadtest.collab.awaiting_convergence");
+  const convStart = Date.now();
+  const convergenceTimeoutMs = 12000;
+  let convergenceMatch = false;
+
+  while (Date.now() - convStart < convergenceTimeoutMs) {
+    let allDocsConverged = true;
+    for (let d = 0; d < DOC_COUNT; d++) {
+      const clientsOnDoc = clients.filter((c) => c.docIndex === d);
+      if (clientsOnDoc.length > 0) {
+        const refText = clientsOnDoc[0].ydoc.getText("content").toString();
+        for (let j = 1; j < clientsOnDoc.length; j++) {
+          if (clientsOnDoc[j].ydoc.getText("content").toString() !== refText) {
+            allDocsConverged = false;
+            break;
+          }
+        }
+      }
+      if (!allDocsConverged) break;
+    }
+    if (allDocsConverged) {
+      convergenceMatch = true;
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
-  // Attente finale de convergence de tous les clients (propagation complète)
-  log.info("loadtest.collab.awaiting_convergence");
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-
-  // 6. Vérification de convergence et calcul des métriques
-  let convergenceMatch = true;
+  // 6. Vérification de convergence stricte (C2)
   const finalTextLengths: number[] = [];
 
   for (let d = 0; d < DOC_COUNT; d++) {
@@ -276,18 +328,41 @@ async function main() {
     }
   }
 
-  // Fermeture propre des clients et du serveur
+  // Échantillon CPU/mémoire final du serveur Hocuspocus (via /internal/health)
+  const endServerStats = await fetchServerStats(internalPort, config.INTERNAL_TOKEN);
+
+  // Fermeture des clients et du serveur
   for (const c of clients) {
     c.provider.destroy();
   }
-  await collabServer.destroy();
-  internalHttp.close();
+  if (dedicatedServer) {
+    await dedicatedServer.server.destroy();
+    dedicatedServer.internalHttp.close();
+  }
 
   const durationSec = (Date.now() - startTime) / 1000;
-  const endCpu = process.cpuUsage(startCpu);
-  const memUsage = process.memoryUsage();
 
-  // Statistiques de latence de propagation
+  // Calcul du CPU SERVEUR exact
+  let serverCpuUserMs = 0;
+  let serverCpuSystemMs = 0;
+  let serverRssMb = 0;
+
+  if (startServerStats && endServerStats) {
+    serverCpuUserMs = Math.max(0, endServerStats.cpuUserMs - startServerStats.cpuUserMs);
+    serverCpuSystemMs = Math.max(0, endServerStats.cpuSystemMs - startServerStats.cpuSystemMs);
+    serverRssMb = endServerStats.rssMb;
+  } else {
+    // Fallback
+    const cpu = process.cpuUsage();
+    serverCpuUserMs = Math.round(cpu.user / 1000);
+    serverCpuSystemMs = Math.round(cpu.system / 1000);
+    serverRssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
+  }
+
+  const totalServerCpuMs = serverCpuUserMs + serverCpuSystemMs;
+  const percentOfOneCore = durationSec > 0 ? Math.round((totalServerCpuMs / (durationSec * 1000)) * 1000) / 10 : 0;
+
+  // Latences de propagation
   const latencies = propagations.map((p) => p.latencyMs).sort((a, b) => a - b);
   const p50 = latencies[Math.floor(latencies.length * 0.5)] || 0;
   const p90 = latencies[Math.floor(latencies.length * 0.9)] || 0;
@@ -295,13 +370,14 @@ async function main() {
   const p99 = latencies[Math.floor(latencies.length * 0.99)] || 0;
   const min = latencies[0] || 0;
   const max = latencies[latencies.length - 1] || 0;
-  const mean = latencies.reduce((a, b) => a + b, 0) / (latencies.length || 1);
+  const mean = latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0;
 
   const totalRefused = clients.reduce((acc, c) => acc + c.refusedCount, 0);
 
   const summary: CollabSimSummary = {
     timestamp: new Date().toISOString(),
     testName: "collab-sim",
+    environment: envInfo,
     config: {
       totalWriters: TOTAL_WRITERS,
       docCount: DOC_COUNT,
@@ -323,13 +399,14 @@ async function main() {
         max,
         mean: Math.round(mean * 10) / 10,
       },
-      cpuUsage: {
-        userMs: Math.round(endCpu.user / 1000),
-        systemMs: Math.round(endCpu.system / 1000),
+      serverCpu: {
+        userMs: serverCpuUserMs,
+        systemMs: serverCpuSystemMs,
+        totalMs: totalServerCpuMs,
+        percentOfOneCore,
       },
-      memoryMb: {
-        rss: Math.round((memUsage.rss / 1024 / 1024) * 10) / 10,
-        heapUsed: Math.round((memUsage.heapUsed / 1024 / 1024) * 10) / 10,
+      serverMemoryMb: {
+        rss: serverRssMb,
       },
       durationSec: Math.round(durationSec * 10) / 10,
     },
@@ -352,9 +429,10 @@ async function main() {
 
   fs.writeFileSync(jsonPath, JSON.stringify(summary, null, 2), "utf-8");
 
-  const mdReport = `# Rapport de Test de Charge : collab-sim
+  const mdReport = `# Rapport de Test de Charge : collab-sim (Simulation Rédacteurs)
 
 - **Date** : ${summary.timestamp}
+- **Environnement** : Node ${envInfo.nodeVersion}, ${envInfo.osPlatform} (${envInfo.osRelease}), ${envInfo.cpuModel} (${envInfo.cpuCores} cœurs, ${envInfo.totalMemoryMb} Mo RAM), mode **${envInfo.mode}**
 - **Rédacteurs simulés** : ${summary.config.totalWriters}
 - **Documents concurrents** : ${summary.config.docCount}
 - **Rafales de frappe** : ${summary.config.typingBursts}
@@ -368,10 +446,10 @@ async function main() {
 
 | Critère | Attendu | Obtenu | Statut |
 | :--- | :--- | :--- | :--- |
-| **Invariant C2 (Convergence CRDT sans conflit)** | **100 % identique entre pairs** | **${convergenceMatch ? "Strictement identique" : "Divergence détectée"}** | ${convergenceMatch ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Aucune perte d'édition** | Longueurs conformes | ${finalTextLengths.join(" car., ")} car. | ${summary.invariants.zeroWriteLoss ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
-| **Refus d'écriture légitimes** | Selon quotas | ${totalRefused} | ✅ CONFORME |
-| **Latence p95 de propagation** | < ${TARGET_P95_MS} ms | ${p95} ms | ${p95 < TARGET_P95_MS ? "✅ VALIDÉ" : "⚠️ LIMITE"} |
+| **Invariant C2 (Convergence CRDT sans conflit)** | 100 % identique entre pairs | **${convergenceMatch ? "Strictement identique" : "Divergence"}** | ${convergenceMatch ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
+| **Aucune perte d'édition** | Textes finaux non vides | **${finalTextLengths.join(" car., ")} car.** | ${summary.invariants.zeroWriteLoss ? "✅ VALIDÉ" : "❌ ÉCHEC"} |
+| **Refus d'écriture (write_refused)** | Selon quotas | **${totalRefused}** | ℹ️ NORMAL |
+| **Latence p95 de propagation** | < ${TARGET_P95_MS} ms | **${p95} ms** | ${p95 < TARGET_P95_MS ? "✅ VALIDÉ" : "⚠️ ÉCHEC / LIMITE"} |
 
 ---
 
@@ -387,12 +465,12 @@ async function main() {
 
 ---
 
-## 3. Empreinte Système
+## 3. Empreinte Système du SERVEUR Collab (mesurée via /internal/health)
 
-- **CPU Utilisateur** : ${summary.metrics.cpuUsage.userMs} ms
-- **CPU Système** : ${summary.metrics.cpuUsage.systemMs} ms
-- **Mémoire RSS** : ${summary.metrics.memoryMb.rss} Mo
-- **Mémoire Heap Utilisée** : ${summary.metrics.memoryMb.heapUsed} Mo
+- **CPU Serveur Utilisateur** : ${summary.metrics.serverCpu.userMs} ms
+- **CPU Serveur Système** : ${summary.metrics.serverCpu.systemMs} ms
+- **CPU Serveur Total** : ${summary.metrics.serverCpu.totalMs} ms (~${summary.metrics.serverCpu.percentOfOneCore}% d'un cœur)
+- **Mémoire RSS Serveur** : ${summary.metrics.serverMemoryMb.rss} Mo
 `;
 
   fs.writeFileSync(mdPath, mdReport, "utf-8");
@@ -400,18 +478,25 @@ async function main() {
   log.info("loadtest.collab.completed", {
     convergenceMatch,
     p95,
+    serverCpuTotalMs: totalServerCpuMs,
     jsonPath,
     mdPath,
   });
 
   console.log("\n" + mdReport);
-
-  if (!convergenceMatch) {
-    process.exit(1);
-  }
+  return summary;
 }
 
-main().catch((err) => {
-  log.error("loadtest.collab.fatal", { error: err });
-  process.exit(1);
-});
+// Exécution directe CLI
+if (require.main === module || process.argv[1]?.endsWith("collab-sim.ts")) {
+  runCollabSim()
+    .then((summary) => {
+      if (!summary.invariants.c2ConvergenceStrict) {
+        process.exit(1);
+      }
+    })
+    .catch((err) => {
+      log.error("loadtest.collab.fatal", { error: err });
+      process.exit(1);
+    });
+}

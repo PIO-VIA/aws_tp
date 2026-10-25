@@ -4,10 +4,9 @@ import {
   DeleteCommand,
   TransactWriteCommand,
   PutCommand,
-  ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
-import { getDocClient } from "../aws/dynamodb";
+import { getDocClient, scanAll } from "../aws/dynamodb";
 import { tableName } from "../config";
 import { hashEmail, SessionPayload } from "../auth/jwt";
 import { LinkRecord } from "../links/types";
@@ -280,19 +279,15 @@ export async function listDocumentLinks(
     throw new Error("Droits insuffisants pour voir les liens");
   }
 
-  const docClient = getDocClient();
   const linksTable = tableName("links");
 
-  // Scan filtré par docId (acceptable pour table links)
-  const res = await docClient.send(
-    new ScanCommand({
-      TableName: linksTable,
-      FilterExpression: "docId = :docId",
-      ExpressionAttributeValues: { ":docId": docId },
-    }),
-  );
+  // Scan paginé filtré par docId (C-06)
+  const items = await scanAll<LinkRecord>({
+    TableName: linksTable,
+    FilterExpression: "docId = :docId",
+    ExpressionAttributeValues: { ":docId": docId },
+  });
 
-  const items = (res.Items as LinkRecord[]) ?? [];
   return items.map((l) => ({
     ...l,
     remaining: Math.max(0, l.maxDownloads - l.issued),

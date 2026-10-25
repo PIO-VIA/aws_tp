@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import { getDocClient } from "../aws/dynamodb";
 import { tableName, getConfig } from "../config";
 import { log } from "../log";
+import { updateBlockedCache } from "./blocked-cache";
 
 export interface QuotaStatus {
   used: number;
@@ -203,6 +204,8 @@ export async function recordAbuseEvent(
         },
       }),
     );
+
+    updateBlockedCache(writerId, blockedUntil);
 
     log.warn("abuse.writer_blocked", { writerId, count, blockedUntil, reason: type });
     return { blocked: true, blockedUntil };
