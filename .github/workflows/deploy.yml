@@ -68,10 +68,11 @@ jobs:
 
       - name: Mise à jour du code des fonctions Lambda
         run: |
+          PREFIX="${{ vars.PROJECT_PREFIX || 'editeur-collab-dev' }}"
           for lambda in download-api pdf-worker pdf-dlq-handler notifier reconciler; do
-            echo "--> Mise à jour du code de la Lambda ${lambda}..."
+            echo "--> Mise à jour du code de la Lambda ${PREFIX}-${lambda}..."
             aws lambda update-function-code \
-              --function-name "${{ vars.PROJECT_PREFIX }}-${lambda}" \
+              --function-name "${PREFIX}-${lambda}" \
               --zip-file "fileb://dist/lambdas/${lambda}.zip" \
               --region "${{ env.AWS_REGION }}"
           done
@@ -79,7 +80,24 @@ jobs:
       - name: Exécution du test de fumée (Smoke Test) contre CloudFront
         run: |
           PREV_TAG=$(git rev-parse --short HEAD~1 2>/dev/null || echo "latest")
-          if ! npm run smoke -- --base-url "${{ vars.CLOUDFRONT_URL }}"; then
+          TARGET_URL="${{ vars.CLOUDFRONT_URL }}"
+          if [ -z "${TARGET_URL}" ]; then
+            echo "--> CLOUDFRONT_URL non renseigné, détection automatique via AWS CloudFront..."
+            CF_DOMAIN=$(aws cloudfront list-distributions \
+              --query "DistributionList.Items[0].DomainName" \
+              --output text 2>/dev/null || true)
+            if [ -n "${CF_DOMAIN}" ] && [ "${CF_DOMAIN}" != "None" ]; then
+              TARGET_URL="https://${CF_DOMAIN}"
+              echo "--> Domaine CloudFront détecté : ${TARGET_URL}"
+            fi
+          fi
+
+          if [ -z "${TARGET_URL}" ]; then
+            echo "::error::CLOUDFRONT_URL est requis pour exécuter le smoke test."
+            exit 1
+          fi
+
+          if ! npm run smoke -- --base-url "${TARGET_URL}"; then
             echo "::error::Le smoke test a échoué. Déclenchez le retour arrière immédiat :"
             echo "::error::./scripts/deploy/rollback-ec2.sh ${PREV_TAG} ${{ vars.EC2_INSTANCE_ID }} ${{ env.AWS_REGION }}"
             exit 1

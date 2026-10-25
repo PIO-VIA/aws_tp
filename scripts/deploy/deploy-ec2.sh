@@ -24,6 +24,21 @@ if [ -z "${INSTANCE_ID}" ]; then
 fi
 
 if [ -z "${INSTANCE_ID}" ]; then
+    echo "--> Tentative de détection automatique de l'instance EC2 via tags..."
+    PROJECT_PREFIX="${PROJECT_PREFIX:-editeur-collab-dev}"
+    INSTANCE_ID=$(aws ec2 describe-instances \
+        --region "${REGION}" \
+        --filters "Name=tag:Name,Values=${PROJECT_PREFIX}-server" "Name=instance-state-name,Values=running" \
+        --query "Reservations[0].Instances[0].InstanceId" \
+        --output text 2>/dev/null || true)
+    if [ "${INSTANCE_ID}" = "None" ]; then INSTANCE_ID=""; fi
+    if [ -n "${INSTANCE_ID}" ]; then
+        echo "--> Instance EC2 détectée : ${INSTANCE_ID}"
+    fi
+fi
+
+if [ -z "${INSTANCE_ID}" ]; then
+    echo "Usage: $0 <TAG> [INSTANCE_ID] [AWS_REGION]" >&2
     echo "Erreur : Impossible de déterminer INSTANCE_ID." >&2
     exit 1
 fi

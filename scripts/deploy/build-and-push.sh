@@ -9,6 +9,18 @@ set -euo pipefail
 REGION="${1:-${AWS_REGION:-eu-north-1}}"
 APP_REPO="${2:-${ECR_APP_URL:-}}"
 COLLAB_REPO="${3:-${ECR_COLLAB_URL:-}}"
+PROJECT_PREFIX="${PROJECT_PREFIX:-editeur-collab-dev}"
+
+# Auto-détection des dépôts ECR si non renseignés
+if [ -z "${APP_REPO}" ] || [ -z "${COLLAB_REPO}" ]; then
+    echo "--> URLs ECR non fournies, détection automatique via AWS STS..."
+    ACCOUNT_ID=$(aws sts get-caller-identity --region "${REGION}" --query Account --output text 2>/dev/null || true)
+    if [ -n "${ACCOUNT_ID}" ] && [ "${ACCOUNT_ID}" != "None" ]; then
+        APP_REPO="${APP_REPO:-${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${PROJECT_PREFIX}-app}"
+        COLLAB_REPO="${COLLAB_REPO:-${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${PROJECT_PREFIX}-collab}"
+        echo "--> Dépôts ECR détectés : ${APP_REPO} et ${COLLAB_REPO}"
+    fi
+fi
 
 if [ -z "${APP_REPO}" ] || [ -z "${COLLAB_REPO}" ]; then
     echo "Usage: $0 [AWS_REGION] [ECR_APP_URL] [ECR_COLLAB_URL]" >&2
