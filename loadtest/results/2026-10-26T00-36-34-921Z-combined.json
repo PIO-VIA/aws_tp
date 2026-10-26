@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-10-26T00:36:34.921Z",
+  "testName": "combined-loadtest",
+  "environment": {
+    "nodeVersion": "v24.21.0",
+    "osPlatform": "linux",
+    "osRelease": "7.0.0-38-generic",
+    "cpuModel": "Intel(R) Core(TM) Ultra 7 155U",
+    "cpuCores": 14,
+    "totalMemoryMb": 14667,
+    "mode": "development"
+  },
+  "config": {
+    "downloadVisitors": 600,
+    "downloadCopies": 500,
+    "collabWriters": 30,
+    "collabDocs": 2,
+    "timeScale": 10
+  },
+  "downloadBurst": {
+    "totalRequests": 600,
+    "totalVisitors": 600,
+    "distinctPresignedUrls": 0,
+    "dbIssuedCount": 0,
+    "grantedCount": 0,
+    "exhaustedCount": 600,
+    "failedCount": 0,
+    "expiredCount": 0,
+    "errors5xxCount": 0,
+    "networkErrorsCount": 0,
+    "unhandledCount": 0,
+    "c6LastGrantedToFirstExhaustedMs": null,
+    "initialLatenciesMs": {
+      "min": 154,
+      "p50": 202,
+      "p90": 952,
+      "p95": 1127,
+      "p99": 1491,
+      "max": 1639,
+      "mean": 365.5
+    },
+    "totalJourneyLatenciesMs": {
+      "min": 154,
+      "p50": 204,
+      "p90": 952,
+      "p95": 1127,
+      "p99": 1491,
+      "max": 1639,
+      "mean": 366.5
+    },
+    "totalDurationSec": 30.1,
+    "throughputReqSec": 19.9
+  },
+  "collabSim": {
+    "totalEditsSent": 90,
+    "totalPropagationsObserved": 1260,
+    "writeRefusedCount": 0,
+    "convergenceMatch": true,
+    "finalTextLengths": [
+      975,
+      975
+    ],
+    "latenciesMs": {
+      "min": 217,
+      "p50": 319,
+      "p90": 500,
+      "p95": 505,
+      "p99": 520,
+      "max": 539,
+      "mean": 340.8
+    },
+    "serverCpu": {
+      "userMs": 4,
+      "systemMs": 2,
+      "totalMs": 6,
+      "percentOfOneCore": 0.1
+    },
+    "serverMemoryMb": {
+      "rss": 117
+    },
+    "durationSec": 7.2
+  },
+  "invariants": {
+    "c1RespectStrict": false,
+    "c1DistinctUrlsMatchIssued": true,
+    "c2ConvergenceStrict": true,
+    "zeroErrors5xx": true,
+    "zeroUnhandledRequests": true
+  }
+}

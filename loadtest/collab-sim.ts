@@ -97,18 +97,29 @@ export async function runCollabSim(options?: {
   collabPort?: number;
   internalPort?: number;
   externalServer?: boolean;
+  targetBaseUrl?: string;
 }): Promise<CollabSimSummary> {
   const TOTAL_WRITERS = options?.totalWriters ?? parseInt(process.env.WRITERS || process.env.TOTAL_WRITERS || "300", 10);
   const DOC_COUNT = options?.docCount ?? parseInt(process.env.DOC_COUNT || "2", 10);
   const TYPING_BURSTS = options?.typingBursts ?? parseInt(process.env.TYPING_BURSTS || "3", 10);
   const TARGET_P95_MS = 200;
 
+  const targetBaseUrl = (options?.targetBaseUrl || process.env.TARGET_BASE_URL || "").replace(/\/$/, "");
+  const isProd = Boolean(targetBaseUrl);
   const collabPort = options?.collabPort ?? parseInt(process.env.COLLAB_PORT || "1240", 10);
   const internalPort = options?.internalPort ?? parseInt(process.env.COLLAB_INTERNAL_PORT || "1241", 10);
-  const isExternal = options?.externalServer ?? (process.env.COLLAB_EXTERNAL === "true");
+  const isExternal = isProd || (options?.externalServer ?? (process.env.COLLAB_EXTERNAL === "true"));
+  const collabWsUrl = isProd
+    ? targetBaseUrl.replace(/^http/, "ws") + "/collab"
+    : `ws://127.0.0.1:${collabPort}`;
 
   const envInfo = getEnvInfo();
-  const config = getConfig();
+  let config: ReturnType<typeof getConfig> | null = null;
+  try {
+    config = getConfig();
+  } catch {
+    // En mode production sans variables d'environnement locales AWS
+  }
 
   log.info("loadtest.collab.init", {
     TOTAL_WRITERS,
@@ -117,10 +128,12 @@ export async function runCollabSim(options?: {
     collabPort,
     internalPort,
     isExternal,
+    collabWsUrl,
+    mode: isProd ? "production_remote" : "local_dedicated",
     env: envInfo,
   });
 
-  // 1. Démarrage du serveur si nécessaire
+  // 1. Démarrage du serveur si nécessaire (uniquement en local non externe)
   let dedicatedServer: ReturnType<typeof createCollabServer> | null = null;
   if (!isExternal) {
     dedicatedServer = createCollabServer();
@@ -129,23 +142,10 @@ export async function runCollabSim(options?: {
   }
 
   // Échantillon CPU/mémoire initial du serveur Hocuspocus (via /internal/health)
-  const startServerStats = await fetchServerStats(internalPort, config.INTERNAL_TOKEN);
+  const startServerStats = config ? await fetchServerStats(internalPort, config.INTERNAL_TOKEN) : null;
   const startTime = Date.now();
 
-  // 2. Création des documents
-  const documents: Array<{ docId: string; ownerId: string; title: string }> = [];
-  for (let d = 0; d < DOC_COUNT; d++) {
-    const ownerEmail = `owner-sim-d${d}-${Date.now()}@asso.fr`;
-    const owner = await upsertWriter(`Owner D${d}`, ownerEmail);
-    const doc = await createDocument(`Document Collaboratif Sim #${d + 1}`, {
-      writerId: owner.writerId,
-      name: owner.name,
-      email: owner.email,
-    });
-    documents.push({ docId: doc.docId, ownerId: owner.writerId, title: `Doc ${d + 1}` });
-  }
-
-  // 3. Initialisation des N rédacteurs
+  // 2. Initialisation des documents et rédacteurs
   interface WriterClient {
     id: number;
     name: string;
@@ -160,60 +160,8 @@ export async function runCollabSim(options?: {
   const clients: WriterClient[] = [];
   const propagations: PropagationRecord[] = [];
 
-  for (let i = 0; i < TOTAL_WRITERS; i++) {
-    const docIndex = i % DOC_COUNT;
-    const doc = documents[docIndex];
-    const email = `writer-sim-${i}-${Date.now()}@asso.fr`;
-    const name = `Rédacteur ${i}`;
-
-    const writerRec = await upsertWriter(name, email);
-    const ydoc = new Y.Doc();
-
-    // Partage du document (rôle editor)
-    await shareDocument({
-      docId: doc.docId,
-      ownerId: doc.ownerId,
-      targetEmail: email,
-      targetName: name,
-      role: "editor",
-    });
-
-    const token = await createCollabToken({
-      writerId: writerRec.writerId,
-      docId: doc.docId,
-    });
-
-    const clientObj: WriterClient = {
-      id: i,
-      name,
-      writerId: writerRec.writerId,
-      docIndex,
-      docId: doc.docId,
-      ydoc,
-      refusedCount: 0,
-      provider: null as unknown as HocuspocusProvider,
-    };
-
-    const provider = new HocuspocusProvider({
-      url: `ws://127.0.0.1:${collabPort}`,
-      name: doc.docId,
-      document: ydoc,
-      token,
-      onStateless(payload) {
-        try {
-          const parsed = JSON.parse(payload.payload);
-          if (parsed.type === "write_refused") {
-            clientObj.refusedCount++;
-          }
-        } catch {
-          // Ignorer
-        }
-      },
-    });
-
-    clientObj.provider = provider;
-
-    ydoc.getText("content").observe((event) => {
+  function attachTextObserver(clientObj: WriterClient) {
+    clientObj.ydoc.getText("content").observe((event) => {
       const receivedAt = Date.now();
       for (const op of event.changes.delta) {
         if (op.insert && typeof op.insert === "string") {
@@ -226,7 +174,7 @@ export async function runCollabSim(options?: {
               propagations.push({
                 fromWriter: fromWriterId,
                 toWriter: clientObj.id,
-                docIndex,
+                docIndex: clientObj.docIndex,
                 latencyMs: latency,
               });
             }
@@ -234,8 +182,157 @@ export async function runCollabSim(options?: {
         }
       }
     });
+  }
 
-    clients.push(clientObj);
+  if (isProd) {
+    // Mode Production : création via API HTTP publique et connexion WSS
+    log.info("loadtest.collab.prod_setup", { targetBaseUrl, collabWsUrl });
+    const documents: Array<{ docId: string; ownerCookie: string }> = [];
+
+    for (let d = 0; d < DOC_COUNT; d++) {
+      const ownerEmail = `owner-sim-d${d}-${Date.now()}@asso.fr`;
+      const ownerRes = await fetch(`${targetBaseUrl}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: targetBaseUrl },
+        body: JSON.stringify({ name: `Owner D${d}`, email: ownerEmail }),
+      });
+      const ownerCookie = ownerRes.headers.get("set-cookie")?.split(";")[0] || "";
+      const docRes = await fetch(`${targetBaseUrl}/api/documents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: ownerCookie, Origin: targetBaseUrl },
+        body: JSON.stringify({ title: `Doc Collab Prod #${d + 1}` }),
+      });
+      const docData = (await docRes.json()) as { docId: string };
+      documents.push({ docId: docData.docId, ownerCookie });
+    }
+
+    const batchSize = 10;
+    for (let i = 0; i < TOTAL_WRITERS; i += batchSize) {
+      const chunk = Array.from({ length: Math.min(batchSize, TOTAL_WRITERS - i) }, (_, idx) => i + idx);
+      await Promise.all(
+        chunk.map(async (wIdx) => {
+          const docIndex = wIdx % DOC_COUNT;
+          const doc = documents[docIndex];
+          const email = `writer-sim-${wIdx}-${Date.now()}@asso.fr`;
+          const name = `Redacteur ${wIdx}`;
+
+          const wRes = await fetch(`${targetBaseUrl}/api/session`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Origin: targetBaseUrl },
+            body: JSON.stringify({ name, email }),
+          });
+          const writerCookie = wRes.headers.get("set-cookie")?.split(";")[0] || "";
+
+          await fetch(`${targetBaseUrl}/api/documents/${doc.docId}/share`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Cookie: doc.ownerCookie, Origin: targetBaseUrl },
+            body: JSON.stringify({ email, name, role: "editor" }),
+          });
+
+          const tokRes = await fetch(`${targetBaseUrl}/api/session/collab-token?docId=${doc.docId}`, {
+            headers: { Cookie: writerCookie },
+          });
+          const { token } = (await tokRes.json()) as { token: string };
+
+          const ydoc = new Y.Doc();
+          const clientObj: WriterClient = {
+            id: wIdx,
+            name,
+            writerId: `w-${wIdx}`,
+            docIndex,
+            docId: doc.docId,
+            ydoc,
+            refusedCount: 0,
+            provider: null as unknown as HocuspocusProvider,
+          };
+
+          const provider = new HocuspocusProvider({
+            url: collabWsUrl,
+            name: doc.docId,
+            document: ydoc,
+            token,
+            onStateless(payload) {
+              try {
+                const parsed = JSON.parse(payload.payload);
+                if (parsed.type === "write_refused") {
+                  clientObj.refusedCount++;
+                }
+              } catch {}
+            },
+          });
+          clientObj.provider = provider;
+          attachTextObserver(clientObj);
+          clients.push(clientObj);
+        }),
+      );
+    }
+    clients.sort((a, b) => a.id - b.id);
+  } else {
+    // Mode Local : création directe en base locale
+    const documents: Array<{ docId: string; ownerId: string; title: string }> = [];
+    for (let d = 0; d < DOC_COUNT; d++) {
+      const ownerEmail = `owner-sim-d${d}-${Date.now()}@asso.fr`;
+      const owner = await upsertWriter(`Owner D${d}`, ownerEmail);
+      const doc = await createDocument(`Document Collaboratif Sim #${d + 1}`, {
+        writerId: owner.writerId,
+        name: owner.name,
+        email: owner.email,
+      });
+      documents.push({ docId: doc.docId, ownerId: owner.writerId, title: `Doc ${d + 1}` });
+    }
+
+    for (let i = 0; i < TOTAL_WRITERS; i++) {
+      const docIndex = i % DOC_COUNT;
+      const doc = documents[docIndex];
+      const email = `writer-sim-${i}-${Date.now()}@asso.fr`;
+      const name = `Rédacteur ${i}`;
+
+      const writerRec = await upsertWriter(name, email);
+      const ydoc = new Y.Doc();
+
+      await shareDocument({
+        docId: doc.docId,
+        ownerId: doc.ownerId,
+        targetEmail: email,
+        targetName: name,
+        role: "editor",
+      });
+
+      const token = await createCollabToken({
+        writerId: writerRec.writerId,
+        docId: doc.docId,
+      });
+
+      const clientObj: WriterClient = {
+        id: i,
+        name,
+        writerId: writerRec.writerId,
+        docIndex,
+        docId: doc.docId,
+        ydoc,
+        refusedCount: 0,
+        provider: null as unknown as HocuspocusProvider,
+      };
+
+      const provider = new HocuspocusProvider({
+        url: collabWsUrl,
+        name: doc.docId,
+        document: ydoc,
+        token,
+        onStateless(payload) {
+          try {
+            const parsed = JSON.parse(payload.payload);
+            if (parsed.type === "write_refused") {
+              clientObj.refusedCount++;
+            }
+          } catch {}
+        },
+      });
+
+      clientObj.provider = provider;
+      attachTextObserver(clientObj);
+      clients.push(clientObj);
+    }
   }
 
   // 4. Attente de synchronisation initiale de tous les clients
@@ -329,7 +426,7 @@ export async function runCollabSim(options?: {
   }
 
   // Échantillon CPU/mémoire final du serveur Hocuspocus (via /internal/health)
-  const endServerStats = await fetchServerStats(internalPort, config.INTERNAL_TOKEN);
+  const endServerStats = config ? await fetchServerStats(internalPort, config.INTERNAL_TOKEN) : null;
 
   // Fermeture des clients et du serveur
   for (const c of clients) {

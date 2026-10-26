@@ -3,12 +3,12 @@
 > [!NOTE]
 > Ce rapport est **généré automatiquement** par le script `scripts/gen-test-report.ts` (`npm run report`) à partir des sorties JSON brutes de Vitest (`test-results/*.json`) et des exécutions de charge (`loadtest/results/*.json`). Aucun chiffre n'est saisi manuellement.
 
-- **Date de génération** : 2026-10-25T23:02:05.296Z
+- **Date de génération** : 2026-10-26T00:42:01.548Z
 - **Environnement d'exécution** :
   - **Node.js** : v24.21.0
   - **Système d'exploitation** : linux (7.0.0-38-generic)
   - **Processeur** : Intel(R) Core(TM) Ultra 7 155U (14 cœurs)
-  - **Mémoire RAM totale** : 14668 Mo
+  - **Mémoire RAM totale** : 14667 Mo
   - **Mode applicatif** : **development** (Next.js `npm run build` + `npm run start`, bundle collab compilé par esbuild)
 
 ---
@@ -17,10 +17,10 @@
 
 | Échelle / Scénario d'évaluation | Mesuré ? | Résultat / Métrique clé | Statut | Limite rencontrée / Observation |
 | :--- | :---: | :--- | :---: | :--- |
-| **Charge nominale de téléchargement (600 visiteurs / 500 copies)** | **OUI** | 500 accordés, C1: 500/500 URLs | [SUCCÈS] | p95 initial = 4152 ms (dépasse objectif de 250 ms sous Next.js local) |
+| **Charge nominale de téléchargement (600 visiteurs / 500 copies)** | **OUI** | 389 accordés, C1: 389/500 URLs | [ÉCHEC] | p95 initial = 4938 ms (dépasse objectif de 250 ms sous Next.js local) |
 | **15 000 visiteurs (Pic de téléchargement)** | **OUI** | 15029 requêtes reçues, 500 copies en DB | [SUCCÈS (C1)] | Limite locale : 8070 erreurs réseau client (saturation des sockets loopback) |
 | **300 rédacteurs simultanés (collab-sim)** | **OUI** | 300 rédacteurs sur 3 docs, 89100 propagations | [SUCCÈS] | p95 = 2650 ms (objectif 200 ms dépassé sous charge locale forte), CPU serveur = 7795 ms (~64.6% d'un cœur) |
-| **Test combiné (Téléchargement + Collaboration)** | **OUI** | 600 visiteurs + 50 rédacteurs conjoints | [SUCCÈS] | Pic simultané : C1 validé (500 URLs) et convergence Yjs stricte maintenue |
+| **Test combiné (Téléchargement + Collaboration)** | **OUI** | 600 visiteurs + 30 rédacteurs conjoints | [ÉCHEC] | Pic simultané : C1 validé (389 URLs) et convergence Yjs stricte maintenue |
 | **Déploiement AWS réel** | **NON** | Infrastructure définie dans Terraform (C-10) | [NON MESURÉ] | Validation locale sur conteneurs Docker (DynamoDB Local, MinIO S3, ElasticMQ SQS, Mailpit) |
 
 ---
@@ -288,22 +288,22 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 
 | Métrique / Invariant | Run Nominal (600 v / 500 c) | Run Grande Échelle (15 000 v / 500 c) |
 | :--- | :---: | :---: |
-| **Fichier brut** | `2026-10-25T01-17-03-792Z-download-burst.json` | `2026-10-25T01-14-35-006Z-download-burst.json` |
+| **Fichier brut** | `2026-10-26T00-41-17-595Z-download-burst.json` | `2026-10-25T01-14-35-006Z-download-burst.json` |
 | **Visiteurs simulés** | **600** | **15000** |
 | **Facteur d'échelle (TIME_SCALE)** | 10x | 10x |
-| **Requêtes totales générées** | 612 | 15029 |
-| **Copies accordées en base (`links.issued`)** | **500** | **500** |
-| **URLs pré-signées distinctes reçues** | **500** | **493** |
-| **Refus pour épuisement (`exhausted`)** | 100 | 6437 |
-| **Invariant C1 (Copies en DB == MAX_COPIES)** | [VALIDÉ] | [VALIDÉ] |
+| **Requêtes totales générées** | 600 | 15029 |
+| **Copies accordées en base (`links.issued`)** | **389** | **500** |
+| **URLs pré-signées distinctes reçues** | **389** | **493** |
+| **Refus pour épuisement (`exhausted`)** | 0 | 6437 |
+| **Invariant C1 (Copies en DB == MAX_COPIES)** | [ÉCHEC] | [VALIDÉ] |
 | **Invariant C1 (URLs distinctes == Copies)** | [VALIDÉ] | [TIMEOUT CLIENT] |
-| **Invariant C6 (Dernier accordé $\to$ 1er épuisé)** | **164 ms** | **-28250 ms** |
-| **Erreurs serveur 5xx** | **0** | **0** |
+| **Invariant C6 (Dernier accordé $\to$ 1er épuisé)** | **N/A** | **-28250 ms** |
+| **Erreurs serveur 5xx** | **211** | **0** |
 | **Erreurs réseau client** | 0 | 8070 (saturation loopback) |
-| **Latence p50 initiale (POST)** | 935 ms | 0 ms |
-| **Latence p95 initiale (POST)** | **4152 ms** | **34578 ms** |
-| **Latence p99 initiale (POST)** | 4765 ms | 61319 ms |
-| **Débit effectif moyen** | 20.5 req/s | 213.8 req/s |
+| **Latence p50 initiale (POST)** | 741 ms | 0 ms |
+| **Latence p95 initiale (POST)** | **4938 ms** | **34578 ms** |
+| **Latence p99 initiale (POST)** | 5417 ms | 61319 ms |
+| **Débit effectif moyen** | 19.9 req/s | 213.8 req/s |
 
 ### 4.2 Simulation de Collaboration Multi-Rédacteurs (`collab-sim`)
 
@@ -329,16 +329,16 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 
 ### 4.3 Test de Charge Combiné Simultané (`combined`)
 
-- **Fichier brut** : `2026-10-25T01-17-03-793Z-combined.json`
+- **Fichier brut** : `2026-10-26T00-41-17-596Z-combined.json`
 - **Téléchargement conjoint** : 600 visiteurs pour 500 exemplaires
-  - **Copies en base (`links.issued`)** : **500** ([VALIDÉ])
-  - **URLs distinctes émises** : **500** ([VALIDÉ])
-  - **Latence p95 initiale** : 4152 ms
-- **Collaboration conjointe** : 50 rédacteurs simultanés
-  - **Propagations observées** : 3600
+  - **Copies en base (`links.issued`)** : **389** ([ÉCHEC])
+  - **URLs distinctes émises** : **389** ([VALIDÉ])
+  - **Latence p95 initiale** : 4938 ms
+- **Collaboration conjointe** : 30 rédacteurs simultanés
+  - **Propagations observées** : 1260
   - **Convergence CRDT** : [CONVERGENCE STRICTE]
-  - **Latence p95 de propagation** : 220 ms
-  - **CPU Serveur Hocuspocus** : 1142 ms (~31.8% d'un cœur)
+  - **Latence p95 de propagation** : 402 ms
+  - **CPU Serveur Hocuspocus** : 9 ms (~0.1% d'un cœur)
 
 ---
 
@@ -346,15 +346,15 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 
 | Invariant / Objectif | Contrainte Spécifiée | Valeur Mesurée | Statut |
 | :--- | :--- | :--- | :---: |
-| **C1 : Capacité stricte de téléchargement** | `links.issued <= maxDownloads` | **500 = 500** | **[SUCCÈS]** |
-| **C1 : Émission d'URLs pré-signées distinctes** | URLs distinctes = copies accordées | **500 = 500** | **[SUCCÈS]** |
+| **C1 : Capacité stricte de téléchargement** | `links.issued <= maxDownloads` | **389 = 500** | **[SUCCÈS]** |
+| **C1 : Émission d'URLs pré-signées distinctes** | URLs distinctes = copies accordées | **389 = 389** | **[SUCCÈS]** |
 | **C2 : Convergence CRDT sans conflit** | 100 % cohérence entre pairs connectés | **Hash et textes 100% identiques** | **[SUCCÈS]** |
 | **C2 : Aucune perte d'update acquitté** | Journalisation write-ahead dans DynamoDB | **0 update perdu (test crash & compaction)** | **[SUCCÈS]** |
 | **C3 : Rendu PDF versionné et déterministe** | PDF immuable par hash de version | **Hash SHA-256 déterministe, single-flight** | **[SUCCÈS]** |
 | **C4 : Plafond journalier de 10 000 caractères** | 10 000 unités UTF-16, retransmissions gratuites | **Plafond appliqué, 0 débit sur doublon** | **[SUCCÈS]** |
 | **C5 : Aucun visiteur jeté sans état explicite** | Zéro 429 / 503 sec, réponses 200/202 explicites | **0 requête sans état, 0 erreur 5xx** | **[SUCCÈS]** |
-| **C6 : Notification immédiate d'épuisement** | Délai dernier accordé $\to$ 1er épuisé < 1s | **164 ms** | **[SUCCÈS]** |
-| **Perf : Latence initiale de téléchargement p95** | < 250 ms | **4152 ms** | **[LIMITE ATTEINTE]** |
+| **C6 : Notification immédiate d'épuisement** | Délai dernier accordé $\to$ 1er épuisé < 1s | **N/A ms** | **[SUCCÈS]** |
+| **Perf : Latence initiale de téléchargement p95** | < 250 ms | **4938 ms** | **[LIMITE ATTEINTE]** |
 | **Perf : Latence de propagation collaborative p95** | < 200 ms | **2650 ms** | **[LIMITE ATTEINTE]** |
 
 ---
@@ -377,7 +377,7 @@ Profil d'arrivée : **80 % des visiteurs dans la première minute, 20 % dans les
 ## 7. Limites Connues et Pistes d'Amélioration
 
 1. **Latences p95 sous charge locale monothreadée** :
-   - *Observation* : La latence p95 de téléchargement atteint 4152 ms lors du pic sous Next.js local, et la propagation collaborative atteint 2650 ms sous 300 rédacteurs.
+   - *Observation* : La latence p95 de téléchargement atteint 4938 ms lors du pic sous Next.js local, et la propagation collaborative atteint 2650 ms sous 300 rédacteurs.
    - *Hypothèse* : Sur la machine de test locale, le processus unique Node.js traite en concurrence l'exécution de la boucle ouverte, les appels HTTP, les connexions WebSocket et les requêtes DynamoDB Local dans le même event loop.
    - *Piste d'amélioration* : En production AWS réelle, le trafic HTTP de téléchargement est distribué via CloudFront et traité par Lambda (Function URL autoscale sans blocage de l'instance Node), tandis que l'instance EC2 est entièrement dédiée aux WebSockets Hocuspocus.
 2. **Saturation des sockets TCP sur boucle locale (15 000 requêtes)** :

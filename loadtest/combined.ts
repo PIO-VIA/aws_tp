@@ -59,11 +59,14 @@ export async function runCombinedLoadTest(): Promise<CombinedLoadTestSummary> {
       totalVisitors: downloadVisitors,
       maxCopies: downloadCopies,
       timeScale,
+      linkIdOverride: process.env.LINK_ID,
+      targetBaseUrl: process.env.TARGET_BASE_URL,
     }),
     runCollabSim({
       totalWriters: collabWriters,
       docCount: collabDocs,
       typingBursts: 3,
+      targetBaseUrl: process.env.TARGET_BASE_URL,
     }),
   ]);
 

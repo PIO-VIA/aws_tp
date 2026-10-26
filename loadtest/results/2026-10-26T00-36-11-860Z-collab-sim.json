@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-10-26T00:36:11.859Z",
+  "testName": "collab-sim",
+  "environment": {
+    "nodeVersion": "v24.21.0",
+    "osPlatform": "linux",
+    "osRelease": "7.0.0-38-generic",
+    "cpuModel": "Intel(R) Core(TM) Ultra 7 155U",
+    "cpuCores": 14,
+    "totalMemoryMb": 14667,
+    "mode": "development"
+  },
+  "config": {
+    "totalWriters": 30,
+    "docCount": 2,
+    "typingBursts": 3,
+    "collabPort": 1234
+  },
+  "metrics": {
+    "totalEditsSent": 90,
+    "totalPropagationsObserved": 1260,
+    "writeRefusedCount": 0,
+    "convergenceMatch": true,
+    "finalTextLengths": [
+      975,
+      975
+    ],
+    "latenciesMs": {
+      "min": 217,
+      "p50": 319,
+      "p90": 500,
+      "p95": 505,
+      "p99": 520,
+      "max": 539,
+      "mean": 340.8
+    },
+    "serverCpu": {
+      "userMs": 4,
+      "systemMs": 2,
+      "totalMs": 6,
+      "percentOfOneCore": 0.1
+    },
+    "serverMemoryMb": {
+      "rss": 117
+    },
+    "durationSec": 7.2
+  },
+  "invariants": {
+    "c2ConvergenceStrict": true,
+    "zeroWriteLoss": true,
+    "p95UnderTarget": false
+  }
+}

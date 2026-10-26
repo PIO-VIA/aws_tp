@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-10-26T00:36:34.920Z",
+  "testName": "download-burst",
+  "environment": {
+    "nodeVersion": "v24.21.0",
+    "osPlatform": "linux",
+    "osRelease": "7.0.0-38-generic",
+    "cpuModel": "Intel(R) Core(TM) Ultra 7 155U",
+    "cpuCores": 14,
+    "totalMemoryMb": 14667,
+    "mode": "development"
+  },
+  "config": {
+    "totalVisitors": 600,
+    "maxCopies": 500,
+    "burstRatio": 0.8,
+    "phase1Sec": 60,
+    "phase2Sec": 240,
+    "timeScale": 10,
+    "maxWaitSec": 30,
+    "targetUrl": "https://d3eg6zl3hu2tvv.cloudfront.net/api/dl/WOdUgrXZItkxQFFy6Sb8EQ/request"
+  },
+  "metrics": {
+    "totalRequests": 600,
+    "totalVisitors": 600,
+    "distinctPresignedUrls": 0,
+    "dbIssuedCount": 0,
+    "grantedCount": 0,
+    "exhaustedCount": 600,
+    "failedCount": 0,
+    "expiredCount": 0,
+    "errors5xxCount": 0,
+    "networkErrorsCount": 0,
+    "unhandledCount": 0,
+    "c6LastGrantedToFirstExhaustedMs": null,
+    "initialLatenciesMs": {
+      "min": 154,
+      "p50": 202,
+      "p90": 952,
+      "p95": 1127,
+      "p99": 1491,
+      "max": 1639,
+      "mean": 365.5
+    },
+    "totalJourneyLatenciesMs": {
+      "min": 154,
+      "p50": 204,
+      "p90": 952,
+      "p95": 1127,
+      "p99": 1491,
+      "max": 1639,
+      "mean": 366.5
+    },
+    "totalDurationSec": 30.1,
+    "throughputReqSec": 19.9
+  },
+  "invariants": {
+    "c1RespectStrict": false,
+    "c1DistinctUrlsMatchIssued": true,
+    "zeroUnhandledRequests": true,
+    "zeroErrors5xx": true,
+    "p95UnderTarget": false
+  }
+}

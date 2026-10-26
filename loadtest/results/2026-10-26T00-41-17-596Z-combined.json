@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-10-26T00:41:17.596Z",
+  "testName": "combined-loadtest",
+  "environment": {
+    "nodeVersion": "v24.21.0",
+    "osPlatform": "linux",
+    "osRelease": "7.0.0-38-generic",
+    "cpuModel": "Intel(R) Core(TM) Ultra 7 155U",
+    "cpuCores": 14,
+    "totalMemoryMb": 14667,
+    "mode": "development"
+  },
+  "config": {
+    "downloadVisitors": 600,
+    "downloadCopies": 500,
+    "collabWriters": 30,
+    "collabDocs": 2,
+    "timeScale": 10
+  },
+  "downloadBurst": {
+    "totalRequests": 600,
+    "totalVisitors": 600,
+    "distinctPresignedUrls": 389,
+    "dbIssuedCount": 389,
+    "grantedCount": 389,
+    "exhaustedCount": 0,
+    "failedCount": 211,
+    "expiredCount": 0,
+    "errors5xxCount": 211,
+    "networkErrorsCount": 0,
+    "unhandledCount": 0,
+    "c6LastGrantedToFirstExhaustedMs": null,
+    "initialLatenciesMs": {
+      "min": 206,
+      "p50": 741,
+      "p90": 3903,
+      "p95": 4938,
+      "p99": 5417,
+      "max": 5711,
+      "mean": 1262.5
+    },
+    "totalJourneyLatenciesMs": {
+      "min": 207,
+      "p50": 742,
+      "p90": 3903,
+      "p95": 5004,
+      "p99": 5418,
+      "max": 5711,
+      "mean": 1264.6
+    },
+    "totalDurationSec": 30.2,
+    "throughputReqSec": 19.9
+  },
+  "collabSim": {
+    "totalEditsSent": 90,
+    "totalPropagationsObserved": 1260,
+    "writeRefusedCount": 0,
+    "convergenceMatch": true,
+    "finalTextLengths": [
+      975,
+      975
+    ],
+    "latenciesMs": {
+      "min": 213,
+      "p50": 263,
+      "p90": 385,
+      "p95": 402,
+      "p99": 408,
+      "max": 409,
+      "mean": 284.7
+    },
+    "serverCpu": {
+      "userMs": 7,
+      "systemMs": 2,
+      "totalMs": 9,
+      "percentOfOneCore": 0.1
+    },
+    "serverMemoryMb": {
+      "rss": 117
+    },
+    "durationSec": 11.4
+  },
+  "invariants": {
+    "c1RespectStrict": false,
+    "c1DistinctUrlsMatchIssued": true,
+    "c2ConvergenceStrict": true,
+    "zeroErrors5xx": false,
+    "zeroUnhandledRequests": true
+  }
+}
