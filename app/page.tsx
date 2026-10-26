@@ -250,62 +250,64 @@ export default function HomePage() {
     );
   }
 
-  // Écran d'authentification et choix de session
+  // Écran d'authentification plein écran avec image de fond et carte centrée
   if (!session) {
     return (
-      <div className="min-h-screen flex flex-col justify-center items-center p-4 sm:p-6 lg:p-10 bg-slate-100/70 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-150 relative">
-        {/* Bouton de bascule de thème en coin supérieur */}
-        <div className="absolute top-4 right-4 z-20">
-          <ThemeToggle />
+      <div className="min-h-screen relative flex items-center justify-center p-4 sm:p-6 lg:p-8 overflow-hidden bg-slate-950 text-slate-900 dark:text-slate-100">
+        {/* Image de fond plein écran avec superposition élégante */}
+        <div className="absolute inset-0 z-0">
+          <Image
+            src="/brand/login-editorial.jpg"
+            alt="Rédaction collaborative pour le journal étudiant"
+            fill
+            className="object-cover object-center scale-105 transform transition duration-1000 ease-out"
+            priority
+          />
+          {/* Dégradés et voiles pour lisibilité parfaite et contraste premium */}
+          <div className="absolute inset-0 bg-slate-950/65 dark:bg-slate-950/80 backdrop-blur-[2px]" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-slate-950/80" />
         </div>
 
-        <div className="w-full max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl overflow-hidden grid grid-cols-1 md:grid-cols-2">
-          {/* Colonne 1 : Illustration éditoriale */}
-          <div className="relative hidden md:flex flex-col justify-between p-8 bg-slate-900 text-white overflow-hidden min-h-[500px]">
-            <Image
-              src="/brand/login-editorial.jpg"
-              alt="Rédaction collaborative pour le journal étudiant"
-              fill
-              className="object-cover opacity-60 mix-blend-luminosity scale-105"
-              priority
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent" />
-
-            <div className="relative z-10">
-              <span className="inline-flex items-center gap-1.5 py-1 px-3 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full text-xs font-semibold uppercase tracking-wider backdrop-blur-xs">
-                <Sparkles className="w-3.5 h-3.5" />
-                Journal étudiant
-              </span>
-            </div>
-
-            <div className="relative z-10 space-y-2">
-              <blockquote className="text-sm font-serif italic text-slate-200 leading-relaxed">
-                « L&apos;écriture partagée au service de notre association. Rédigez à plusieurs en direct, suivez les curseurs de chacun et publiez votre tirage limité. »
-              </blockquote>
-              <p className="text-xs text-indigo-300 font-semibold">Éditeur Collaboratif — AWS 2026</p>
-            </div>
+        {/* Barre supérieure discrète (Badge à gauche, bascule de thème à droite) */}
+        <div className="absolute top-5 left-5 right-5 z-20 flex items-center justify-between pointer-events-none">
+          <div className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/60 dark:bg-slate-900/80 border border-white/10 text-white/90 text-xs font-medium backdrop-blur-md shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Journal étudiant — Plateforme AWS</span>
           </div>
+          <div className="pointer-events-auto bg-slate-900/60 dark:bg-slate-900/80 border border-white/10 rounded-full p-1 backdrop-blur-md shadow-lg">
+            <ThemeToggle />
+          </div>
+        </div>
 
-          {/* Colonne 2 : Formulaire de connexion */}
-          <div className="p-6 sm:p-10 flex flex-col justify-center">
+        {/* Carte formulaire centrée au milieu de l'écran avec effet glassmorphism */}
+        <div className="w-full max-w-md relative z-10 my-auto">
+          <div className="bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border border-white/40 dark:border-slate-800/80 rounded-3xl shadow-2xl shadow-black/40 p-6 sm:p-8 transition-all">
+            {/* En-tête avec logo et description */}
             <div className="text-center mb-6">
-              <Logo variant="stacked" size={44} className="mb-2" />
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Espace de rédaction collaborative et diffusion de tirages
+              <div className="flex justify-center mb-3">
+                <Logo variant="stacked" size={48} />
+              </div>
+              <h1 className="text-xl font-bold font-serif text-slate-950 dark:text-white tracking-tight">
+                Connexion Rédacteur
+              </h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
+                Espace de rédaction collaborative et diffusion de tirages limités
               </p>
             </div>
 
+            {/* Formulaire de connexion */}
             <form onSubmit={handleLogin} className="space-y-4">
               {loginError && (
-                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-700 dark:text-rose-300 text-xs">
-                  {loginError}
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                  <TriangleAlert className="w-4 h-4 shrink-0" />
+                  <span>{loginError}</span>
                 </div>
               )}
 
               <div>
                 <label
                   htmlFor="name-input"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider"
                 >
                   Nom complet
                 </label>
@@ -316,14 +318,14 @@ export default function HomePage() {
                   value={loginName}
                   onChange={(e) => setLoginName(e.target.value)}
                   placeholder="Ex. Alice Dupont"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950/70 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition shadow-xs"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor="email-input"
-                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wider"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider"
                 >
                   Adresse e-mail
                 </label>
@@ -334,19 +336,19 @@ export default function HomePage() {
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   placeholder="alice@asso.fr"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950/70 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition shadow-xs"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-semibold text-sm transition shadow-sm shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-semibold text-sm transition shadow-md shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer mt-2"
               >
                 {isSubmitting ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-white/30 border-t-white"></div>
-                    <span>Connexion…</span>
+                    <span>Connexion en cours...</span>
                   </>
                 ) : (
                   "Accéder à la rédaction"
@@ -355,8 +357,8 @@ export default function HomePage() {
             </form>
 
             {/* Comptes de test rapide */}
-            <div className="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800">
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mb-2 text-center">
+            <div className="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800/80">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mb-2.5 text-center">
                 Comptes de test rapide :
               </p>
               <div className="grid grid-cols-3 gap-2">
@@ -366,7 +368,7 @@ export default function HomePage() {
                     setLoginName("Alice Dupont");
                     setLoginEmail("alice@asso.fr");
                   }}
-                  className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs rounded-xl transition text-center cursor-pointer font-medium"
+                  className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/90 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs rounded-xl transition text-center cursor-pointer font-medium border border-transparent hover:border-slate-300 dark:hover:border-slate-600"
                 >
                   Alice
                 </button>
@@ -376,7 +378,7 @@ export default function HomePage() {
                     setLoginName("Bob Martin");
                     setLoginEmail("bob@asso.fr");
                   }}
-                  className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs rounded-xl transition text-center cursor-pointer font-medium"
+                  className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/90 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs rounded-xl transition text-center cursor-pointer font-medium border border-transparent hover:border-slate-300 dark:hover:border-slate-600"
                 >
                   Bob
                 </button>
@@ -386,11 +388,18 @@ export default function HomePage() {
                     setLoginName("Charlie Dubois");
                     setLoginEmail("charlie@asso.fr");
                   }}
-                  className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs rounded-xl transition text-center cursor-pointer font-medium"
+                  className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/90 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs rounded-xl transition text-center cursor-pointer font-medium border border-transparent hover:border-slate-300 dark:hover:border-slate-600"
                 >
                   Charlie
                 </button>
               </div>
+            </div>
+
+            {/* Note éditoriale discrète en bas de carte */}
+            <div className="mt-5 text-center">
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                Solution sécurisée hébergée sur AWS Cloud
+              </p>
             </div>
           </div>
         </div>
@@ -449,38 +458,43 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Bannière d'accueil avec illustration éditoriale */}
-        <div className="relative overflow-hidden rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row">
-          <div className="p-6 sm:p-8 flex-1 flex flex-col justify-center space-y-3 z-10">
-            <div className="inline-flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-900 w-fit">
+        {/* Bannière héroïque éditoriale pleine largeur avec image en arrière-plan */}
+        <div className="relative overflow-hidden rounded-3xl min-h-[220px] sm:min-h-[250px] p-6 sm:p-10 flex flex-col justify-center border border-slate-200 dark:border-slate-800 shadow-md">
+          {/* Image de fond avec superposition de dégradé cinématique */}
+          <div className="absolute inset-0 z-0">
+            <Image
+              src="/brand/dashboard-editorial.jpg"
+              alt="Atelier éditorial du journal étudiant"
+              fill
+              className="object-cover object-center scale-105 transition duration-700 ease-out"
+              priority
+            />
+            {/* Voile sombre et dégradé latéral pour une lisibilité parfaite des textes */}
+            <div className="absolute inset-0 bg-slate-950/75 dark:bg-slate-950/80 backdrop-blur-[1px]" />
+            <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/80 to-transparent" />
+          </div>
+
+          {/* Contenu textuel et actions au-dessus du fond */}
+          <div className="relative z-10 space-y-3 max-w-xl">
+            <div className="inline-flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 backdrop-blur-md w-fit shadow-xs">
               <Sparkles className="w-3.5 h-3.5" />
-              Salle de rédaction
+              <span>Salle de rédaction</span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-tight">
+            <h2 className="text-2xl sm:text-3xl font-bold font-serif text-white leading-tight tracking-tight">
               Bonjour, {session.writer.name}
             </h2>
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-lg leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-200 leading-relaxed font-sans">
               Bienvenue dans votre atelier de rédaction collaborative. Écrivez à plusieurs sur les articles en temps réel et générez vos liens de tirage à diffusion limitée.
             </p>
             <div className="pt-2">
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition shadow-xs flex items-center gap-2 cursor-pointer w-fit"
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition shadow-md shadow-indigo-600/40 flex items-center gap-2 cursor-pointer w-fit"
               >
                 <Plus className="w-4 h-4" />
                 <span>Nouveau document</span>
               </button>
             </div>
-          </div>
-
-          <div className="relative w-full md:w-80 h-44 md:h-auto shrink-0 bg-slate-100 dark:bg-slate-800">
-            <Image
-              src="/brand/dashboard-editorial.jpg"
-              alt="Atelier éditorial du journal étudiant"
-              fill
-              className="object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t md:bg-gradient-to-r from-white dark:from-slate-900 via-transparent to-transparent" />
           </div>
         </div>
 

@@ -125,7 +125,7 @@ export async function runDownloadBurst(options?: {
   });
 
   // 1. Initialisation des données de test
-  let rawLinkId = (options?.linkIdOverride || process.env.LINK_ID || "").trim();
+  const rawLinkId = (options?.linkIdOverride || process.env.LINK_ID || "").trim();
   let linkId = rawLinkId;
   if (linkId.includes("/")) {
     linkId = linkId.split("/").filter(Boolean).pop() || linkId;
